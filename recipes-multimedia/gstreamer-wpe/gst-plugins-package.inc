@@ -2,9 +2,11 @@ PACKAGESPLITFUNCS_prepend = " split_gstreamer10_packages "
 PACKAGESPLITFUNCS_append = " set_metapkg_rdepends "
 
 python split_gstreamer10_packages () {
-    gst_libdir = d.expand('${libdir}/gstreamer-${LIBV}')
+    gst_libdir = d.expand('${libdir}/wpe/gstreamer-${LIBV}')
     postinst = d.getVar('plugin_postinst', True)
-    glibdir = d.getVar('libdir', True)
+    glibdir = d.getVar('libdir', True)+ "/wpe"
+    
+    print ("BRAM DEBUG ${PN} glibdir: %s, gst_libdir: %s, postinst: %s" % glibdir, gst_libdir, postinst)
 
     do_split_packages(d, glibdir, '^lib(.*)\.so\.*', 'lib%s', 'gstreamer %s library', extra_depends='', allow_links=True)
     do_split_packages(d, gst_libdir, 'libgst(.*)\.so$', d.expand('${PN}-%s'), 'GStreamer plugin for %s', postinst=postinst, extra_depends='')
@@ -50,7 +52,7 @@ ALLOW_EMPTY_${PN}-staticdev = "1"
 PACKAGES += "${PN}-apps ${PN}-meta ${PN}-glib"
 
 FILES_${PN} = ""
-FILES_${PN}-apps = "${bindir}"
+FILES_${PN}-apps = "${bindir}/wpe"
 FILES_${PN}-glib = "${datadir}/glib-2.0"
 
 RRECOMMENDS_${PN} += "${PN}-meta"
