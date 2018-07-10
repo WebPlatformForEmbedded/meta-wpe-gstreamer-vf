@@ -1,4 +1,4 @@
-require gstreamer1.0-plugins.inc
+require gstreamer1.0-wpe-plugins.inc
 
 SRC_URI_append = "\
     file://0001-Makefile.am-don-t-hardcode-libtool-name-when-running.patch \

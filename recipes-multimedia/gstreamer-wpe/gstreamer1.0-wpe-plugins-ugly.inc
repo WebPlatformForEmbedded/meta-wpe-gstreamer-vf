@@ -1,4 +1,4 @@
-require gstreamer1.0-plugins.inc
+require gstreamer1.0-wpe-plugins.inc
 
 LICENSE = "GPLv2+ & LGPLv2.1+ & LGPLv2+"
 LICENSE_FLAGS = "commercial"
