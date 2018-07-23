@@ -26,10 +26,10 @@ do_install_append () {
  find ${D}${includedir} -maxdepth 1 ! -name wpe -exec mv -v  {} ${D}${includedir}/wpe \;
  find ${D}${libexecdir} -maxdepth 1 ! -name wpe -exec mv -v  {} ${D}${libexecdir}/wpe \;
  find ${D}${datadir} -maxdepth 1 ! -name wpe -exec mv -v  {} ${D}${datadir}/wpe \;
- # correct paths in pc files
- for f in `ls ${D}${libdir}/pkgconfig/*.pc` ; sed -e "s;/lib;/lib/wpe;g" -e "s;/include;/include/wpe;g" -e "s;/share;/share/wpe;g" -e "s;/bin;/bin/wpe;g" $f > ; done
- # rename
- find ${D}${libdir}/pkgconfig -maxdepth 1 -type f -exec mv -v  {} ${D}${libdir}/pkgconfig/$(basename {}) \;
+ # correct paths in pc files 
+ for f in `ls ${D}${libdir}/pkgconfig/gstreamer*1.0.pc` ; do sed -e "s;/lib;/lib/wpe;g" -e "s;/include;/include/wpe;g" -e "s;/share;/share/wpe;g" -e "s;/bin;/bin/wpe;g" $f; done
+ # rename pkgcongig
+ find ${D}${libdir}/pkgconfig -maxdepth 1 -type f -exec mv -v  {} ${D}${libdir}/pkgconfig/wpe-$(basename {}) \;
 }
 
 
