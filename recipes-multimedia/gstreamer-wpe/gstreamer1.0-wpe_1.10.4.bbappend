@@ -10,26 +10,37 @@ FILES_${PN}-dev += "\
          ${libdir}/wpe/girepository-1.0/*.typelib \
          ${datadir}/wpe \
          "
-                   
+
 FILES_SOLIBSDEV = ""
 SOLIBS = ".so"
 INSANE_SKIP_${PN} += "dev-so"
-                   
+
 do_install_append () {
- install -d ${D}${bindir}/wpe
- install -d ${D}${libdir}/wpe
- install -d ${D}${includedir}/wpe
- install -d ${D}${libexecdir}/wpe
- install -d ${D}${datadir}/wpe
- find ${D}${bindir} -maxdepth 1 ! -name wpe -exec mv -v  {} ${D}${bindir}/wpe \;
- find ${D}${libdir} -maxdepth 1 ! -name wpe ! -name pkgconfig -exec mv -v  {} ${D}${libdir}/wpe \;
- find ${D}${includedir} -maxdepth 1 ! -name wpe -exec mv -v  {} ${D}${includedir}/wpe \;
- find ${D}${libexecdir} -maxdepth 1 ! -name wpe -exec mv -v  {} ${D}${libexecdir}/wpe \;
- find ${D}${datadir} -maxdepth 1 ! -name wpe -exec mv -v  {} ${D}${datadir}/wpe \;
- # correct paths in pc files 
- for f in `ls ${D}${libdir}/pkgconfig/gstreamer*1.0.pc` ; do sed -e "s;/lib;/lib/wpe;g" -e "s;/include;/include/wpe;g" -e "s;/share;/share/wpe;g" -e "s;/bin;/bin/wpe;g" $f; done
- # rename pkgcongig
- find ${D}${libdir}/pkgconfig -maxdepth 1 -type f -exec mv -v  {} ${D}${libdir}/pkgconfig/wpe-$(basename {}) \;
+    install -d ${D}${bindir}/wpe
+    install -d ${D}${libdir}/wpe
+    install -d ${D}${includedir}/wpe
+    install -d ${D}${libexecdir}/wpe
+    install -d ${D}${datadir}/wpe
+    find ${D}${bindir} -maxdepth 1 ! -name wpe -exec mv -v  {} ${D}${bindir}/wpe \;
+    find ${D}${libdir} -maxdepth 1 ! -name wpe ! -name pkgconfig -exec mv -v  {} ${D}${libdir}/wpe \;
+    find ${D}${includedir} -maxdepth 1 ! -name wpe -exec mv -v  {} ${D}${includedir}/wpe \;
+    find ${D}${libexecdir} -maxdepth 1 ! -name wpe -exec mv -v  {} ${D}${libexecdir}/wpe \;
+    find ${D}${datadir} -maxdepth 1 ! -name wpe -exec mv -v  {} ${D}${datadir}/wpe \;
+    # correct paths in pc files
+    for f in `ls ${D}${libdir}/pkgconfig/gstreamer*1.0.pc` ; do sed -e "s;/lib;/lib/wpe;g" -e "s;/include;/include/wpe;g" -e "s;/share;/share/wpe;g" -e "s;/bin;/bin/wpe;g" $f; done
+
+    # rename package config files
+    mv ${D}${libdir}/pkgconfig/gstreamer-1.0.pc ${D}${libdir}/pkgconfig/wpe-gstreamer-1.0.pc
+    mv ${D}${libdir}/pkgconfig/gstreamer-base-1.0.pc ${D}${libdir}/pkgconfig/wpe-gstreamer-base-1.0.pc
+    mv ${D}${libdir}/pkgconfig/gstreamer-check-1.0.pc ${D}${libdir}/pkgconfig/wpe-gstreamer-check-1.0.pc
+    mv ${D}${libdir}/pkgconfig/gstreamer-controller-1.0.pc ${D}${libdir}/pkgconfig/wpe-gstreamer-controller-1.0.pc
+    mv ${D}${libdir}/pkgconfig/gstreamer-net-1.0.pc ${D}${libdir}/pkgconfig/wpe-gstreamer-net-1.0.pc
 }
 
+do_populate_sysroot () {
+    install -d ${STAGING_LIBDIR}/wpe
+    install -d ${STAGING_LIBDIR}/pkgconfig
 
+    install -m 0755 ${D}/usr/lib/wpe/*.so ${STAGING_LIBDIR}/wpe
+    install -m 0644 ${D}/usr/lib/pkgconfig/*.pc ${STAGING_LIBDIR}/pkgconfig
+}
