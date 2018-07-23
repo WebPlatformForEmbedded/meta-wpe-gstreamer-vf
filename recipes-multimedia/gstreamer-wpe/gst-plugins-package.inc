@@ -4,14 +4,13 @@ PACKAGESPLITFUNCS_append = " set_metapkg_rdepends "
 python split_gstreamer10_packages () {
     gst_libdir = d.expand('${libdir}/wpe/gstreamer-${LIBV}')
     postinst = d.getVar('plugin_postinst', True)
-    glibdir = d.getVar('libdir', True)+ "/wpe"
-    
-    print ("BRAM DEBUG ${PN} glibdir: %s, gst_libdir: %s, postinst: %s" % glibdir, gst_libdir, postinst)
+    glibdir = d.getVar('libdir', True) + "/wpe"
 
-    do_split_packages(d, glibdir, '^lib(.*)\.so\.*', 'lib%s', 'gstreamer %s library', extra_depends='', allow_links=True)
+    do_split_packages(d, glibdir, '^lib(.*)\.so\.*', d.expand('${PN}-%s'), 'gstreamer %s library', extra_depends='', allow_links=True)
     do_split_packages(d, gst_libdir, 'libgst(.*)\.so$', d.expand('${PN}-%s'), 'GStreamer plugin for %s', postinst=postinst, extra_depends='')
     do_split_packages(d, glibdir+'/girepository-1.0', 'Gst(.*)-1.0\.typelib$', d.expand('${PN}-%s-typelib'), 'GStreamer typelib file for %s', postinst=postinst, extra_depends='')
     do_split_packages(d, gst_libdir, 'libgst(.*)\.la$', d.expand('${PN}-%s-dev'), 'GStreamer plugin for %s (development files)', extra_depends='${PN}-dev')
+    do_split_packages(d, glibdir, 'libgst(.*)\.la$', d.expand('${PN}-%s-dev'), 'GStreamer plugin for %s (development files)', extra_depends='${PN}-dev')
     do_split_packages(d, gst_libdir, 'libgst(.*)\.a$', d.expand('${PN}-%s-staticdev'), 'GStreamer plugin for %s (static development files)', extra_depends='${PN}-staticdev')
 }
 

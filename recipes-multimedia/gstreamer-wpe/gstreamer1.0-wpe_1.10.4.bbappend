@@ -40,7 +40,9 @@ do_install_append () {
 do_populate_sysroot () {
     install -d ${STAGING_LIBDIR}/wpe
     install -d ${STAGING_LIBDIR}/pkgconfig
+    install -d ${STAGING_INCDIR}/wpe
 
-    install -m 0755 ${D}/usr/lib/wpe/*.so ${STAGING_LIBDIR}/wpe
-    install -m 0644 ${D}/usr/lib/pkgconfig/*.pc ${STAGING_LIBDIR}/pkgconfig
+    install -m 0755 ${D}${libdir}/wpe/*.so ${STAGING_LIBDIR}/wpe
+    install -m 0644 ${D}${libdir}/pkgconfig/*.pc ${STAGING_LIBDIR}/pkgconfig
+    mv -v ${D}${includedir}/wpe/* ${STAGING_INCDIR}/wpe
 }

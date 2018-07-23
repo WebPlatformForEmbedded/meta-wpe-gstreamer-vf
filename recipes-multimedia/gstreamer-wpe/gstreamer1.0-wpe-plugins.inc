@@ -46,6 +46,50 @@ patch_gtk_doc_makefiles() {
            ${S}/common/gtk-doc*mak
 }
 
+do_install_append () {
+  install -d ${D}${bindir}/wpe
+  install -d ${D}${libdir}/wpe
+  install -d ${D}${datadir}/wpe
+
+  find ${D}${bindir} -maxdepth 1 ! -name wpe -exec mv -v  {} ${D}${bindir}/wpe \;
+  find ${D}${libdir} -maxdepth 1 ! -name wpe ! -name pkgconfig -exec mv -v  {} ${D}${libdir}/wpe \;
+  find ${D}${datadir} -maxdepth 1 ! -name wpe -exec mv -v  {} ${D}${datadir}/wpe \;
+
+  if [ -d "${D}${includedir}/gstreamer-1.0" ]; then
+    install -d ${D}${includedir}/wpe
+    mv ${D}${includedir}/gstreamer-1.0 ${D}${includedir}/wpe/gstreamer-1.0
+  fi
+}
+
+#do_packagedata[noexec] = "1"
+
+do_populate_sysroot () {
+  install -d ${STAGING_LIBDIR}/wpe
+
+  if [ -f "${D}${libdir}/wpe/*.so" ]; then
+    install -m 0755 ${D}${libdir}/wpe/*.so ${STAGING_LIBDIR}/wpe
+  fi
+
+  if [ -d "${D}${libdir}/wpe/gstreamer-1.0" ]; then
+    install -d ${STAGING_LIBDIR}/wpe/gstreamer-1.0
+    install -m 0755 ${D}${libdir}/wpe/gstreamer-1.0/*.so ${STAGING_LIBDIR}/wpe/gstreamer-1.0/
+  fi
+
+  if [ -d "${D}${includedir}/gstreamer-1.0" ]; then
+    install -d ${STAGING_INCDIR}/wpe
+    find ${D}${includedir}/wpe -maxdepth 1 ! -name wpe -exec mv -v  {} ${STAGING_INCDIR}/wpe \;
+  fi
+
+  if [ -d "${D}${libdir}/pkgconfig" ]; then
+    install -d ${STAGING_LIBDIR}/pkgconfig
+    install -m 0644 ${D}${libdir}/pkgconfig/*.pc ${STAGING_LIBDIR}/pkgconfig
+  fi
+}
+
 do_configure[prefuncs] += " delete_pkg_m4_file patch_gtk_doc_makefiles"
+
+FILES_${PN} = "${datadir}/*"
+
+INSANE_SKIP += "dev-so"
 
 PACKAGES_DYNAMIC = "^${PN}-.*"
