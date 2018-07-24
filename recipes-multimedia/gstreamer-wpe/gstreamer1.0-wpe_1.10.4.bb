@@ -16,15 +16,11 @@ SRC_URI[sha256sum] = "50c2f5af50a6cc6c0a3f3ed43bdd8b5e2bff00bacfb766d4be139ec06d
 S = "${WORKDIR}/gstreamer-${PV}"
 
 
-python do_rename_pc_files() {
-    pkgconfigDir = d.expand('${D}${libdir}/pkgconfig')
-    print('pkgconfig: ' + pkgconfigDir)
-    pcFiles = os.listdir(pkgconfigDir) or []
-
-    for file in pcFiles:
-        if file[:9] == 'gstreamer':
-            print('Renaming: ' + file)
-            os.rename( os.path.join(pkgconfigDir, file), os.path.join(pkgconfigDir, 'wpe-' + file) )
+# fix gir build error
+do_compile_prepend () {
+    cp ${B}/pkgconfig/wpe-gstreamer.pc ${B}/pkgconfig/gstreamer-1.0.pc
 }
 
-addtask do_rename_pc_files after do_install before do_package
+do_install_prepend () {
+    rm ${B}/pkgconfig/gstreamer-1.0.pc
+}
