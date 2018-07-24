@@ -27,14 +27,7 @@ do_install_append () {
     find ${D}${libexecdir} -maxdepth 1 ! -name wpe -exec mv -v  {} ${D}${libexecdir}/wpe \;
     find ${D}${datadir} -maxdepth 1 ! -name wpe -exec mv -v  {} ${D}${datadir}/wpe \;
     # correct paths in pc files
-    for f in `ls ${D}${libdir}/pkgconfig/gstreamer*1.0.pc` ; do sed -e "s;/lib;/lib/wpe;g" -e "s;/include;/include/wpe;g" -e "s;/share;/share/wpe;g" -e "s;/bin;/bin/wpe;g" $f; done
-
-    # rename package config files
-    mv ${D}${libdir}/pkgconfig/gstreamer-1.0.pc ${D}${libdir}/pkgconfig/wpe-gstreamer-1.0.pc
-    mv ${D}${libdir}/pkgconfig/gstreamer-base-1.0.pc ${D}${libdir}/pkgconfig/wpe-gstreamer-base-1.0.pc
-    mv ${D}${libdir}/pkgconfig/gstreamer-check-1.0.pc ${D}${libdir}/pkgconfig/wpe-gstreamer-check-1.0.pc
-    mv ${D}${libdir}/pkgconfig/gstreamer-controller-1.0.pc ${D}${libdir}/pkgconfig/wpe-gstreamer-controller-1.0.pc
-    mv ${D}${libdir}/pkgconfig/gstreamer-net-1.0.pc ${D}${libdir}/pkgconfig/wpe-gstreamer-net-1.0.pc
+    for f in `ls ${D}${libdir}/pkgconfig/*.pc` ; do sed -i -e "s;/lib;/lib/wpe;g" -e "s;/include;/include/wpe;g" -e "s;/share;/share/wpe;g" -e "s;/bin;/bin/wpe;g" $f; done
 }
 
 do_populate_sysroot () {
@@ -44,5 +37,5 @@ do_populate_sysroot () {
 
     install -m 0755 ${D}${libdir}/wpe/*.so ${STAGING_LIBDIR}/wpe
     install -m 0644 ${D}${libdir}/pkgconfig/*.pc ${STAGING_LIBDIR}/pkgconfig
-    mv -v ${D}${includedir}/wpe/* ${STAGING_INCDIR}/wpe
+    cp -r -v ${D}${includedir}/wpe/* ${STAGING_INCDIR}/wpe
 }

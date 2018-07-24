@@ -46,6 +46,19 @@ patch_gtk_doc_makefiles() {
            ${S}/common/gtk-doc*mak
 }
 
+python do_rename_pc_files() {
+    pkgconfigDir = d.expand('${B}/pkgconfig')
+    print('pkgconfig: ' + pkgconfigDir)
+    pcFiles = os.listdir(pkgconfigDir) or []
+
+    for file in pcFiles:
+        if file[:9] == 'gstreamer':
+            print('Renaming: ' + file)
+            os.rename( os.path.join(pkgconfigDir, file), os.path.join(pkgconfigDir, 'wpe-' + file) )
+}
+
+addtask do_rename_pc_files after do_compile before do_install
+
 do_install_append () {
   install -d ${D}${bindir}/wpe
   install -d ${D}${libdir}/wpe
@@ -59,9 +72,17 @@ do_install_append () {
     install -d ${D}${includedir}/wpe
     mv ${D}${includedir}/gstreamer-1.0 ${D}${includedir}/wpe/gstreamer-1.0
   fi
-}
 
-#do_packagedata[noexec] = "1"
+  if [ -d "${B}/pkgconfig" ]; then
+    install -d ${D}${libdir}/pkgconfig
+
+    # correct paths in pc files
+    for f in `ls ${B}/pkgconfig/gstreamer*.pc` ; do sed -i -e "s;/lib;/lib/wpe;g" -e "s;/include;/include/wpe;g" -e "s;/share;/share/wpe;g" -e "s;/bin;/bin/wpe;g" $f; done
+
+    cp  ${B}/pkgconfig/*.pc ${D}${libdir}/pkgconfig
+  fi
+
+}
 
 do_populate_sysroot () {
   install -d ${STAGING_LIBDIR}/wpe
@@ -77,12 +98,12 @@ do_populate_sysroot () {
 
   if [ -d "${D}${includedir}/gstreamer-1.0" ]; then
     install -d ${STAGING_INCDIR}/wpe
-    find ${D}${includedir}/wpe -maxdepth 1 ! -name wpe -exec mv -v  {} ${STAGING_INCDIR}/wpe \;
+    find ${D}${includedir}/wpe -maxdepth 1 ! -name wpe -exec cp -v  {} ${STAGING_INCDIR}/wpe \;
   fi
 
   if [ -d "${D}${libdir}/pkgconfig" ]; then
     install -d ${STAGING_LIBDIR}/pkgconfig
-    install -m 0644 ${D}${libdir}/pkgconfig/*.pc ${STAGING_LIBDIR}/pkgconfig
+    find ${D}${libdir}/pkgconfig -maxdepth 1 ! -name wpe -exec cp -v  {} ${STAGING_LIBDIR}/pkgconfig \;
   fi
 }
 
