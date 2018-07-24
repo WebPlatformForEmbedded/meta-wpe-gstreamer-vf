@@ -64,8 +64,27 @@ patch_gtk_doc_makefiles() {
            ${S}/common/gtk-doc*mak
 }
 
-do_configure[prefuncs] += " delete_pkg_m4_file patch_gtk_doc_makefiles"
+patch_pc_files () {
+        # Deal with pc files by patching the sources
+        for f in `ls ${S}/pkgconfig/*.pc.in`; \
+        do  \
+          file=`echo $f | sed "s/.*\///"` ; \
+          pc=`echo $f | sed -r "s/.+\/(.+)\..+/\1/"` ; \
+          echo "BRAM DEBUG Dealing with ${f} file=${file} pc=${pc}" ; \
+          sed -i -e "s;/lib;/lib/wpe;g" -e "s;/include;/include/wpe;g" -e "s;/share;/share/wpe;g" -e "s;/bin;/bin/wpe;g" -e "s/\@libdir\@/\@libdir\@\/wpe/g" -e "s/\@bindir\@/\@bindir\@\/wpe/g" -e "s/\@libexecdir\@/\@libexecdir\@\/wpe/g" -e "s/\@includedir\@/\@includedir\@\/wpe/g" $f ; \
+          mv ${f} ${S}/pkgconfig/wpe-${file} ; \
+        done
+        sed -i -e "s;pkgconfig/gstreamer;pkgconfig/wpe-gstreamer;g"  ${S}/configure.ac ; \
+        sed -i -e s/gstreamer/wpe-gstreamer/g  ${S}/pkgconfig/Makefile.in ; \
+        sed -i -e s/gstreamer/wpe-gstreamer/g  ${S}/pkgconfig/Makefile.am ; \
+}
+
+do_configure[prefuncs] += " delete_pkg_m4_file patch_gtk_doc_makefiles patch_pc_files"
 
 do_compile_prepend() {
         export GIR_EXTRA_LIBS_PATH="${B}/gst/.libs:${B}/libs/gst/base/.libs"
 }
+
+FILES_SOLIBSDEV = ""
+SOLIBS = ".so"
+INSANE_SKIP_${PN} += "dev-so"

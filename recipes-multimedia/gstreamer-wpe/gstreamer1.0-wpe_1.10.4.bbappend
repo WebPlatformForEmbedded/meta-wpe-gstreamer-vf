@@ -11,10 +11,6 @@ FILES_${PN}-dev += "\
          ${datadir}/wpe \
          "
 
-FILES_SOLIBSDEV = ""
-SOLIBS = ".so"
-INSANE_SKIP_${PN} += "dev-so"
-
 do_install_append () {
     install -d ${D}${bindir}/wpe
     install -d ${D}${libdir}/wpe
@@ -26,8 +22,6 @@ do_install_append () {
     find ${D}${includedir} -maxdepth 1 ! -name wpe -exec mv -v  {} ${D}${includedir}/wpe \;
     find ${D}${libexecdir} -maxdepth 1 ! -name wpe -exec mv -v  {} ${D}${libexecdir}/wpe \;
     find ${D}${datadir} -maxdepth 1 ! -name wpe -exec mv -v  {} ${D}${datadir}/wpe \;
-    # correct paths in pc files
-    for f in `ls ${D}${libdir}/pkgconfig/*.pc` ; do sed -i -e "s;/lib;/lib/wpe;g" -e "s;/include;/include/wpe;g" -e "s;/share;/share/wpe;g" -e "s;/bin;/bin/wpe;g" $f; done
 }
 
 do_populate_sysroot () {

@@ -57,7 +57,8 @@ python do_rename_pc_files() {
             os.rename( os.path.join(pkgconfigDir, file), os.path.join(pkgconfigDir, 'wpe-' + file) )
 }
 
-addtask do_rename_pc_files after do_compile before do_install
+# addtask do_rename_pc_files after do_compile before do_install
+
 
 do_install_append () {
   install -d ${D}${bindir}/wpe
@@ -72,16 +73,25 @@ do_install_append () {
     install -d ${D}${includedir}/wpe
     mv ${D}${includedir}/gstreamer-1.0 ${D}${includedir}/wpe/gstreamer-1.0
   fi
+}
 
-  if [ -d "${B}/pkgconfig" ]; then
-    install -d ${D}${libdir}/pkgconfig
-
-    # correct paths in pc files
-    for f in `ls ${B}/pkgconfig/gstreamer*.pc` ; do sed -i -e "s;/lib;/lib/wpe;g" -e "s;/include;/include/wpe;g" -e "s;/share;/share/wpe;g" -e "s;/bin;/bin/wpe;g" $f; done
-
-    cp  ${B}/pkgconfig/*.pc ${D}${libdir}/pkgconfig
-  fi
-
+patch_pc_files () {
+        # Deal with pc files by patching the sources
+        for f in `ls ${S}/pkgconfig/*.pc.in`; \
+        do  \
+          file=`echo $f | sed "s/.*\///"` ; \
+          pc=`echo $f | sed -r "s/.+\/(.+)\..+/\1/"` ; \
+          sed -i -e "s;/lib;/lib/wpe;g" -e "s;/include;/include/wpe;g" -e "s;/share;/share/wpe;g" -e "s;/bin;/bin/wpe;g" -e "s/\@libdir\@/\@libdir\@\/wpe/g" -e "s/\@bindir\@/\@bindir\@\/wpe/g" -e "s/\@libexecdir\@/\@libexecdir\@\/wpe/g" -e "s/\@includedir\@/\@includedir\@\/wpe/g" $f ; \
+          mv ${f} ${S}/pkgconfig/wpe-${file} ; \
+        done
+        sed -i -e "s;pkgconfig/gstreamer;pkgconfig/wpe-gstreamer;g"  ${S}/configure.ac
+        sed -i -e s/gstreamer/wpe-gstreamer/g ${S}/pkgconfig/Makefile.in
+        sed -i -e s/gstreamer/wpe-gstreamer/g ${S}/pkgconfig/Makefile.am
+        # This is for the package so it will pickup the correct pc files from sysroot.
+        sed -i -e s/\ gstreamer/\ wpe-gstreamer/g ${S}/common/m4/gst-check.m4
+        sed -i -e s/prefix\ gstreamer/prefix\ wpe-gstreamer/g  ${S}/configure.ac
+        # correct plugin install location
+        sed -i -e "s;/gstreamer;/wpe/gstreamer;g" ${S}/common/m4/gst-plugindir.m4
 }
 
 do_populate_sysroot () {
@@ -107,9 +117,13 @@ do_populate_sysroot () {
   fi
 }
 
-do_configure[prefuncs] += " delete_pkg_m4_file patch_gtk_doc_makefiles"
+do_configure[prefuncs] += " delete_pkg_m4_file patch_gtk_doc_makefiles patch_pc_files"
 
 FILES_${PN} = "${datadir}/*"
+
+FILES_SOLIBSDEV = ""
+SOLIBS = ".so"
+INSANE_SKIP_${PN} += "dev-so"
 
 INSANE_SKIP += "dev-so"
 
