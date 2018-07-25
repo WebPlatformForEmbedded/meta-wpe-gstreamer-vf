@@ -100,10 +100,7 @@ patch_pc_files () {
 
 do_populate_sysroot () {
   install -d ${STAGING_LIBDIR}/wpe
-
-  if [ -f "${D}${libdir}/wpe/*.so" ]; then
-    install -m 0755 ${D}${libdir}/wpe/*.so ${STAGING_LIBDIR}/wpe
-  fi
+  install -m 0755 ${D}${libdir}/wpe/*.so ${STAGING_LIBDIR}/wpe
 
   if [ -d "${D}${libdir}/wpe/gstreamer-1.0" ]; then
     install -d ${STAGING_LIBDIR}/wpe/gstreamer-1.0
