@@ -100,11 +100,18 @@ patch_pc_files () {
 
 do_populate_sysroot () {
   install -d ${STAGING_LIBDIR}/wpe
-  install -m 0755 ${D}${libdir}/wpe/*.so ${STAGING_LIBDIR}/wpe
+
+  for f in `find ${D}${libdir}/wpe -maxdepth 1 -name "lib*" ! -type d ! -name "*.la"`; do \
+    echo "Installing $f"
+    install -m 0755 $f ${STAGING_LIBDIR}/wpe ; \
+  done
 
   if [ -d "${D}${libdir}/wpe/gstreamer-1.0" ]; then
     install -d ${STAGING_LIBDIR}/wpe/gstreamer-1.0
-    install -m 0755 ${D}${libdir}/wpe/gstreamer-1.0/*.so ${STAGING_LIBDIR}/wpe/gstreamer-1.0/
+    for f in `find ${D}${libdir}/wpe/gstreamer-1.0 -maxdepth 1 -name "lib*" ! -type d ! -name "*.la"` ; do \
+      echo "Installing $f"
+      install -m 0755 $f ${STAGING_LIBDIR}/wpe ; \
+    done
   fi
 
   if [ -d "${D}${includedir}/wpe/gstreamer-1.0" ]; then
