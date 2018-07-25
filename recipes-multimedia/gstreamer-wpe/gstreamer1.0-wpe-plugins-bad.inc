@@ -163,3 +163,20 @@ FILES_${PN}-dev += "${libdir}/wpe/gstreamer-${LIBV}/include/gst/gl/gstglconfig.h
 FILES_${PN}-freeverb += "${datadir}/gstreamer-${LIBV}/presets/GstFreeverb.prs"
 FILES_${PN}-opencv += "${datadir}/gst-plugins-bad/${LIBV}/opencv*"
 FILES_${PN}-voamrwbenc += "${datadir}/gstreamer-${LIBV}/presets/GstVoAmrwbEnc.prs"
+
+extra_patch_files_gst_plugins_bad () {
+      if [ ! -f ${S}/extra_patch_files_gst_plugins_bad.done ]; then
+        sed -i -e "s;GST_ALLOCATORS\,\ gstreamer-allocators;GST_ALLOCATORS\,\ wpe-gstreamer-allocators;g" ${S}/configure.ac
+        touch ${S}/extra_patch_files_gst_plugins_bad.done
+      fi
+}
+
+do_configure[prefuncs] += " extra_patch_files_gst_plugins_bad"
+
+do_install_append () {
+  if [ -f ${D}${libdir}/gstreamer-${LIBV}/include/gst/gl/gstglconfig.h ]; then
+    install -d ${D}${libdir}/wpe/gstreamer-${LIBV}/include/gst/gl
+    mv ${D}${libdir}/gstreamer-${LIBV}/include/gst/gl/gstglconfig.h ${D}${libdir}/wpe/gstreamer-${LIBV}/include/gst/gl
+    rm -rf ${D}${libdir}/gstreamer-${LIBV}
+  fi
+}
