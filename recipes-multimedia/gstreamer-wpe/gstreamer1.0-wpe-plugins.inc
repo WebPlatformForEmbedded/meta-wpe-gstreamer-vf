@@ -110,9 +110,9 @@ do_populate_sysroot () {
     install -m 0755 ${D}${libdir}/wpe/gstreamer-1.0/*.so ${STAGING_LIBDIR}/wpe/gstreamer-1.0/
   fi
 
-  if [ -d "${D}${includedir}/gstreamer-1.0" ]; then
+  if [ -d "${D}${includedir}/wpe/gstreamer-1.0" ]; then
     install -d ${STAGING_INCDIR}/wpe
-    find ${D}${includedir}/wpe -maxdepth 1 ! -name wpe -exec cp -v  {} ${STAGING_INCDIR}/wpe \;
+    find ${D}${includedir}/wpe -maxdepth 1 ! -name wpe -exec cp -av  {} ${STAGING_INCDIR}/wpe \;
   fi
 
   if [ -d "${D}${libdir}/pkgconfig" ]; then
