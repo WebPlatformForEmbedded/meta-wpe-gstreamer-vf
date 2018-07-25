@@ -70,8 +70,7 @@ patch_pc_files () {
         do  \
           file=`echo $f | sed "s/.*\///"` ; \
           pc=`echo $f | sed -r "s/.+\/(.+)\..+/\1/"` ; \
-          echo "BRAM DEBUG Dealing with ${f} file=${file} pc=${pc}" ; \
-          sed -i -e "s;/lib;/lib/wpe;g" -e "s;/include;/include/wpe;g" -e "s;/share;/share/wpe;g" -e "s;/bin;/bin/wpe;g" -e "s/\@libdir\@/\@libdir\@\/wpe/g" -e "s/\@bindir\@/\@bindir\@\/wpe/g" -e "s/\@libexecdir\@/\@libexecdir\@\/wpe/g" -e "s/\@includedir\@/\@includedir\@\/wpe/g" -e "s;Requires: gstreamer-;Requires: gstreamer-wpe-;g" $f ; \
+          sed -i -e "s;/lib;/lib/wpe;g" -e "s;/include;/include/wpe;g" -e "s;/share;/share/wpe;g" -e "s;/bin;/bin/wpe;g" -e "s/\@libdir\@/\@libdir\@\/wpe/g" -e "s/\@bindir\@/\@bindir\@\/wpe/g" -e "s/\@libexecdir\@/\@libexecdir\@\/wpe/g" -e "s/\@includedir\@/\@includedir\@\/wpe/g" -e "s;Requires: gstreamer-;Requires: wpe-gstreamer-;g" $f ; \
           mv ${f} ${S}/pkgconfig/wpe-${file} ; \
         done
         sed -i -e "s;pkgconfig/gstreamer;pkgconfig/wpe-gstreamer;g"  ${S}/configure.ac ; \
