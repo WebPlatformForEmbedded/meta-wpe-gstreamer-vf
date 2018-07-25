@@ -77,6 +77,7 @@ do_install_append () {
 
 patch_pc_files () {
         # Deal with pc files by patching the sources
+        if [ ! -f ${S}/patch_pc_files.done ]; then
         for f in `ls ${S}/pkgconfig/*.pc.in`; \
         do  \
           file=`echo $f | sed "s/.*\///"` ; \
@@ -92,6 +93,8 @@ patch_pc_files () {
         sed -i -e s/prefix\ gstreamer/prefix\ wpe-gstreamer/g  ${S}/configure.ac
         # correct plugin install location
         sed -i -e "s;/gstreamer;/wpe/gstreamer;g" ${S}/common/m4/gst-plugindir.m4
+        touch ${S}/patch_pc_files.done
+        fi
 }
 
 do_populate_sysroot () {

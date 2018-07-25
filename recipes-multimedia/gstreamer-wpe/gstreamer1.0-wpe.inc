@@ -66,6 +66,7 @@ patch_gtk_doc_makefiles() {
 
 patch_pc_files () {
         # Deal with pc files by patching the sources
+        if [ ! -f ${S}/patch_pc_files.done  ]; then
         for f in `ls ${S}/pkgconfig/*.pc.in`; \
         do  \
           file=`echo $f | sed "s/.*\///"` ; \
@@ -76,6 +77,8 @@ patch_pc_files () {
         sed -i -e "s;pkgconfig/gstreamer;pkgconfig/wpe-gstreamer;g"  ${S}/configure.ac ; \
         sed -i -e s/gstreamer/wpe-gstreamer/g  ${S}/pkgconfig/Makefile.in ; \
         sed -i -e s/gstreamer/wpe-gstreamer/g  ${S}/pkgconfig/Makefile.am ; \
+        touch ${S}/patch_pc_files.done
+        fi
 }
 
 do_configure[prefuncs] += " delete_pkg_m4_file patch_gtk_doc_makefiles patch_pc_files"
