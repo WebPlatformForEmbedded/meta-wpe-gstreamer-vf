@@ -115,22 +115,22 @@ patch_pc_files () {
 do_populate_sysroot () {
   install -d ${STAGING_LIBDIR}
 
-  for f in `find ${D}${libdir} -maxdepth 1 -name "lib*" ! -type d ! -name "*.la"`; do \
+  for f in `find ${D}${libdir} -maxdepth 1 -name "lib*" ! -type d`; do \
     echo "Installing $f"
     install -m 0755 $f ${STAGING_LIBDIR} ; \
   done
 
   if [ -d "${D}${libdir}/gstreamer-1.0-wpe" ]; then
     install -d ${STAGING_LIBDIR}/gstreamer-1.0-wpe
-    for f in `find ${D}${libdir}/gstreamer-1.0-wpe -maxdepth 1 -name "lib*" ! -type d ! -name "*.la"` ; do \
+    for f in `find ${D}${libdir}/gstreamer-1.0-wpe -maxdepth 1 -name "lib*" ! -type d` ; do \
       echo "Installing $f"
-      install -m 0755 $f ${STAGING_LIBDIR}/gstreamer-1.0-wpe ; \
+      cp -av --no-preserve=ownership --preserve=links $f ${STAGING_LIBDIR}/gstreamer-1.0-wpe ; \
     done
   fi
 
   if [ -d "${D}${includedir}/wpe/gstreamer-1.0" ]; then
     install -d ${STAGING_INCDIR}/wpe
-    find ${D}${includedir}/wpe -maxdepth 1 ! -name wpe -exec cp -av  {} ${STAGING_INCDIR}/wpe \;
+    find ${D}${includedir}/wpe -maxdepth 1 ! -name wpe -exec  cp -av --no-preserve=ownership --preserve=links  {} ${STAGING_INCDIR}/wpe \;
   fi
 
   if [ -d "${D}${libdir}/pkgconfig" ]; then

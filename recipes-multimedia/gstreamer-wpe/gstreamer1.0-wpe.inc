@@ -119,16 +119,16 @@ do_populate_sysroot () {
     install -d ${STAGING_LIBDIR}/pkgconfig
     install -d ${STAGING_INCDIR}/wpe
 
-    for f in `find ${D}${libdir} -maxdepth 1 -name "lib*" ! -type d ! -name "*.la"`; do \
+    for f in `find ${D}${libdir} -maxdepth 1 -name "lib*" ! -type d` ; do \
       echo "Installing $f"
       install -m 0755 $f ${STAGING_LIBDIR} ; \
     done
 
     if [ -d "${D}${libdir}/gstreamer-1.0" ]; then
       install -d ${STAGING_LIBDIR}/gstreamer-1.0
-      for f in `find ${D}${libdir}/gstreamer-1.0 -maxdepth 1 -name "lib*" ! -type d ! -name "*.la"` ; do \
+      for f in `find ${D}${libdir}/gstreamer-1.0 -maxdepth 1 -name "lib*" ! -type d` ; do \
         echo "Installing $f"
-        install -m 0755 $f ${STAGING_LIBDIR}/gstreamer-1.0 ; \
+         cp -av --no-preserve=ownership --preserve=links $f ${STAGING_LIBDIR}/gstreamer-1.0 ; \
       done
     fi
 
