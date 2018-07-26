@@ -2,7 +2,7 @@ PACKAGESPLITFUNCS_prepend = " split_gstreamer10_packages "
 PACKAGESPLITFUNCS_append = " set_metapkg_rdepends "
 
 python split_gstreamer10_packages () {
-    gst_libdir = d.expand('${libdir}/gstreamer-${LIBV}')
+    gst_libdir = d.expand('${libdir}/gstreamer-${LIBV}-wpe')
     postinst = d.getVar('plugin_postinst', True)
     glibdir = d.getVar('libdir', True)
 

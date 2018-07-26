@@ -159,7 +159,7 @@ export OPENCV_PREFIX = "${STAGING_DIR_TARGET}${prefix}"
 ARM_INSTRUCTION_SET_armv4 = "arm"
 ARM_INSTRUCTION_SET_armv5 = "arm"
 
-FILES_${PN}-dev += "${libdir}/wpe/gstreamer-${LIBV}/include/gst/gl/gstglconfig.h"
+FILES_${PN}-dev += "${libdir}/gstreamer-${LIBV}-wpe/include/gst/gl/gstglconfig.h"
 FILES_${PN}-freeverb += "${datadir}/gstreamer-${LIBV}/presets/GstFreeverb.prs"
 FILES_${PN}-opencv += "${datadir}/gst-plugins-bad/${LIBV}/opencv*"
 FILES_${PN}-voamrwbenc += "${datadir}/gstreamer-${LIBV}/presets/GstVoAmrwbEnc.prs"
@@ -175,8 +175,8 @@ do_configure[prefuncs] += " extra_patch_files_gst_plugins_bad"
 
 do_install_append () {
   if [ -f ${D}${libdir}/gstreamer-${LIBV}/include/gst/gl/gstglconfig.h ]; then
-    install -d ${D}${libdir}/wpe/gstreamer-${LIBV}/include/gst/gl
-    mv ${D}${libdir}/gstreamer-${LIBV}/include/gst/gl/gstglconfig.h ${D}${libdir}/wpe/gstreamer-${LIBV}/include/gst/gl
+    install -d ${D}${libdir}/gstreamer-${LIBV}-wpe/include/gst/gl
+    mv ${D}${libdir}/gstreamer-${LIBV}/include/gst/gl/gstglconfig.h ${D}${libdir}/gstreamer-${LIBV}-wpe/include/gst/gl
     rm -rf ${D}${libdir}/gstreamer-${LIBV}
   fi
 }

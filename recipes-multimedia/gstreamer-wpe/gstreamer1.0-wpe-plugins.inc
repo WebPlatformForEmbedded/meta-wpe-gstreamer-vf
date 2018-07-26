@@ -100,7 +100,7 @@ patch_pc_files () {
         sed -i -e s/\ gstreamer/\ wpe-gstreamer/g ${S}/common/m4/gst-check.m4
         sed -i -e s/prefix\ gstreamer/prefix\ wpe-gstreamer/g  ${S}/configure.ac
         # correct plugin install location
-        # sed -i -e "s;/gstreamer;/wpe/gstreamer;g" ${S}/common/m4/gst-plugindir.m4
+        sed -i -e "s;/gstreamer-\$GST_API_VERSION;/gstreamer-\$\{GST_API_VERSION\}-wpe;g" ${S}/common/m4/gst-plugindir.m4
         #rename libs
         for f in `find ${S} -name Makefile.in -o -name Makefile.am -o -name configure.ac`; do \
           sed -i \
@@ -120,11 +120,11 @@ do_populate_sysroot () {
     install -m 0755 $f ${STAGING_LIBDIR} ; \
   done
 
-  if [ -d "${D}${libdir}/gstreamer-1.0" ]; then
-    install -d ${STAGING_LIBDIR}/gstreamer-1.0
-    for f in `find ${D}${libdir}/gstreamer-1.0 -maxdepth 1 -name "lib*" ! -type d ! -name "*.la"` ; do \
+  if [ -d "${D}${libdir}/gstreamer-1.0-wpe" ]; then
+    install -d ${STAGING_LIBDIR}/gstreamer-1.0-wpe
+    for f in `find ${D}${libdir}/gstreamer-1.0-wpe -maxdepth 1 -name "lib*" ! -type d ! -name "*.la"` ; do \
       echo "Installing $f"
-      install -m 0755 $f ${STAGING_LIBDIR}/gstreamer-1.0 ; \
+      install -m 0755 $f ${STAGING_LIBDIR}/gstreamer-1.0-wpe ; \
     done
   fi
 
