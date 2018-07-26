@@ -62,11 +62,9 @@ python do_rename_pc_files() {
 
 do_install_append () {
   install -d ${D}${bindir}/wpe
-  install -d ${D}${libdir}/wpe
   install -d ${D}${datadir}/wpe
 
   find ${D}${bindir} -maxdepth 1 ! -name wpe -exec mv -v  {} ${D}${bindir}/wpe \;
-  find ${D}${libdir} -maxdepth 1 ! -name wpe ! -name pkgconfig -exec mv -v  {} ${D}${libdir}/wpe \;
   find ${D}${datadir} -maxdepth 1 ! -name wpe -exec mv -v  {} ${D}${datadir}/wpe \;
 
   if [ -d "${D}${includedir}/gstreamer-1.0" ]; then
@@ -78,11 +76,20 @@ do_install_append () {
 patch_pc_files () {
         # Deal with pc files by patching the sources
         if [ ! -f ${S}/patch_pc_files.done ]; then
-        for f in `ls ${S}/pkgconfig/*.pc.in`; \
+        for f in `ls ${S}/pkgconfig/gstreamer*.pc.in`; \
         do  \
           file=`echo $f | sed "s/.*\///"` ; \
           pc=`echo $f | sed -r "s/.+\/(.+)\..+/\1/"` ; \
-          sed -i -e "s;/lib;/lib/wpe;g" -e "s;/include;/include/wpe;g" -e "s;/share;/share/wpe;g" -e "s;/bin;/bin/wpe;g" -e "s/\@libdir\@/\@libdir\@\/wpe/g" -e "s/\@bindir\@/\@bindir\@\/wpe/g" -e "s/\@libexecdir\@/\@libexecdir\@\/wpe/g" -e "s/\@includedir\@/\@includedir\@\/wpe/g" -e "s;\ gstreamer-;\ wpe-gstreamer-;g"  $f ; \
+          sed -i \
+              -e "s;/include;/include/wpe;g" \
+              -e "s;/share;/share/wpe;g" \
+              -e "s;/bin;/bin/wpe;g" \
+              -e "s/\@bindir\@/\@bindir\@\/wpe/g" \
+              -e "s/\@libexecdir\@/\@libexecdir\@\/wpe/g" \
+              -e "s/\@includedir\@/\@includedir\@\/wpe/g" \
+              -e "s;\ gstreamer-;\ wpe-gstreamer-;g" \
+              -e "s/lgst/lwpegst/g" \
+               $f ; \
           mv ${f} ${S}/pkgconfig/wpe-${file} ; \
         done
         sed -i -e "s;pkgconfig/gstreamer;pkgconfig/wpe-gstreamer;g" \
@@ -93,24 +100,31 @@ patch_pc_files () {
         sed -i -e s/\ gstreamer/\ wpe-gstreamer/g ${S}/common/m4/gst-check.m4
         sed -i -e s/prefix\ gstreamer/prefix\ wpe-gstreamer/g  ${S}/configure.ac
         # correct plugin install location
-        sed -i -e "s;/gstreamer;/wpe/gstreamer;g" ${S}/common/m4/gst-plugindir.m4
+        # sed -i -e "s;/gstreamer;/wpe/gstreamer;g" ${S}/common/m4/gst-plugindir.m4
+        #rename libs
+        for f in `find ${S} -name Makefile.in -o -name Makefile.am -o -name configure.ac`; do \
+          sed -i \
+              -e s/libgst/libwpegst/g \
+              -e s/lgst/lwpegst/g \
+              $f ; \
+        done
         touch ${S}/patch_pc_files.done
         fi
 }
 
 do_populate_sysroot () {
-  install -d ${STAGING_LIBDIR}/wpe
+  install -d ${STAGING_LIBDIR}
 
-  for f in `find ${D}${libdir}/wpe -maxdepth 1 -name "lib*" ! -type d ! -name "*.la"`; do \
+  for f in `find ${D}${libdir} -maxdepth 1 -name "lib*" ! -type d ! -name "*.la"`; do \
     echo "Installing $f"
-    install -m 0755 $f ${STAGING_LIBDIR}/wpe ; \
+    install -m 0755 $f ${STAGING_LIBDIR} ; \
   done
 
-  if [ -d "${D}${libdir}/wpe/gstreamer-1.0" ]; then
-    install -d ${STAGING_LIBDIR}/wpe/gstreamer-1.0
-    for f in `find ${D}${libdir}/wpe/gstreamer-1.0 -maxdepth 1 -name "lib*" ! -type d ! -name "*.la"` ; do \
+  if [ -d "${D}${libdir}/gstreamer-1.0" ]; then
+    install -d ${STAGING_LIBDIR}/gstreamer-1.0
+    for f in `find ${D}${libdir}/gstreamer-1.0 -maxdepth 1 -name "lib*" ! -type d ! -name "*.la"` ; do \
       echo "Installing $f"
-      install -m 0755 $f ${STAGING_LIBDIR}/wpe/gstreamer-1.0 ; \
+      install -m 0755 $f ${STAGING_LIBDIR}/gstreamer-1.0 ; \
     done
   fi
 
@@ -121,18 +135,12 @@ do_populate_sysroot () {
 
   if [ -d "${D}${libdir}/pkgconfig" ]; then
     install -d ${STAGING_LIBDIR}/pkgconfig
-    find ${D}${libdir}/pkgconfig -maxdepth 1 ! -name wpe -exec cp -v  {} ${STAGING_LIBDIR}/pkgconfig \;
+    install -m 0644 ${D}${libdir}/pkgconfig/wpe*.pc ${STAGING_LIBDIR}/pkgconfig
   fi
 }
 
 do_configure[prefuncs] += " delete_pkg_m4_file patch_gtk_doc_makefiles patch_pc_files"
 
 FILES_${PN} = "${datadir}/*"
-
-FILES_SOLIBSDEV = ""
-SOLIBS = ".so"
-INSANE_SKIP_${PN} += "dev-so"
-
-INSANE_SKIP += "dev-so"
 
 PACKAGES_DYNAMIC = "^${PN}-.*"

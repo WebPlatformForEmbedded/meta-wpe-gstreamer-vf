@@ -39,8 +39,8 @@ CACHED_CONFIGUREVARS += "ac_cv_header_sys_poll_h=no"
 
 PACKAGES += "${PN}-bash-completion"
 
-FILES_${PN} += "${libdir}/wpe/gstreamer-1.0/*.so"
-FILES_${PN}-dev += "${libdir}/wpe/gstreamer-1.0/*.la ${libdir}/wpe/gstreamer-1.0/*.a ${libdir}/wpe/gstreamer-1.0/include"
+FILES_${PN} += "${libdir}/gstreamer-1.0/*.so"
+FILES_${PN}-dev += "${libdir}/gstreamer-1.0/*.la ${libdir}/gstreamer-1.0/*.a ${libdir}/gstreamer-1.0/include"
 FILES_${PN}-bash-completion += "${datadir}/bash-completion/completions/ ${datadir}/bash-completion/helpers/gst*"
 
 RRECOMMENDS_${PN}_qemux86 += "kernel-module-snd-ens1370 kernel-module-snd-rawmidi"
@@ -67,26 +67,79 @@ patch_gtk_doc_makefiles() {
 patch_pc_files () {
         # Deal with pc files by patching the sources
         if [ ! -f ${S}/patch_pc_files.done  ]; then
-        for f in `ls ${S}/pkgconfig/*.pc.in`; \
+        for f in `ls ${S}/pkgconfig/gstreamer*.pc.in`; \
         do  \
           file=`echo $f | sed "s/.*\///"` ; \
           pc=`echo $f | sed -r "s/.+\/(.+)\..+/\1/"` ; \
-          sed -i -e "s;/lib;/lib/wpe;g" -e "s;/include;/include/wpe;g" -e "s;/share;/share/wpe;g" -e "s;/bin;/bin/wpe;g" -e "s/\@libdir\@/\@libdir\@\/wpe/g" -e "s/\@bindir\@/\@bindir\@\/wpe/g" -e "s/\@libexecdir\@/\@libexecdir\@\/wpe/g" -e "s/\@includedir\@/\@includedir\@\/wpe/g" -e "s;\ gstreamer-;\ wpe-gstreamer-;g" $f ; \
+          sed -i \
+              -e "s;/include;/include/wpe;g" \
+              -e "s;/share;/share/wpe;g" \
+              -e "s;/bin;/bin/wpe;g" \
+              -e "s/\@bindir\@/\@bindir\@\/wpe/g" \
+              -e "s/\@libexecdir\@/\@libexecdir\@\/wpe/g" \
+              -e "s/\@includedir\@/\@includedir\@\/wpe/g" \
+              -e "s;\ gstreamer-;\ wpe-gstreamer-;g" \
+              -e "s/lgst/lwpegst/g" \
+              $f ; \
           mv ${f} ${S}/pkgconfig/wpe-${file} ; \
         done
-        sed -i -e "s;pkgconfig/gstreamer;pkgconfig/wpe-gstreamer;g"  ${S}/configure.ac ; \
-        sed -i -e s/gstreamer/wpe-gstreamer/g  ${S}/pkgconfig/Makefile.in ; \
-        sed -i -e s/gstreamer/wpe-gstreamer/g  ${S}/pkgconfig/Makefile.am ; \
+        sed -i -e "s;pkgconfig/gstreamer;pkgconfig/wpe-gstreamer;g"  ${S}/configure.ac
+        sed -i -e s/gstreamer/wpe-gstreamer/g  ${S}/pkgconfig/Makefile.in
+        sed -i -e s/gstreamer/wpe-gstreamer/g  ${S}/pkgconfig/Makefile.am
+        #rename libs
+        for f in `find ${S} -name Makefile.in -o -name Makefile.am -o -name configure.ac`; do \
+          sed -i \
+              -e s/libgst/libwpegst/g \
+              -e s/lgst/lwpegst/g \
+              $f ; \
+        done
         touch ${S}/patch_pc_files.done
         fi
 }
 
 do_configure[prefuncs] += " delete_pkg_m4_file patch_gtk_doc_makefiles patch_pc_files"
 
+FILES_${PN}-dev += "\
+         ${datadir}/wpe \
+         "
+
+do_install_append () {
+    install -d ${D}${bindir}/wpe
+    install -d ${D}${includedir}/wpe
+    install -d ${D}${libexecdir}/wpe
+    install -d ${D}${datadir}/wpe
+    find ${D}${bindir} -maxdepth 1 ! -name wpe -exec mv -v  {} ${D}${bindir}/wpe \;
+    find ${D}${includedir} -maxdepth 1 ! -name wpe -exec mv -v  {} ${D}${includedir}/wpe \;
+    find ${D}${libexecdir} -maxdepth 1 ! -name wpe -exec mv -v  {} ${D}${libexecdir}/wpe \;
+    find ${D}${datadir} -maxdepth 1 ! -name wpe -exec mv -v  {} ${D}${datadir}/wpe \;
+}
+
+do_populate_sysroot () {
+    install -d ${STAGING_LIBDIR}
+    install -d ${STAGING_LIBDIR}/pkgconfig
+    install -d ${STAGING_INCDIR}/wpe
+
+    for f in `find ${D}${libdir} -maxdepth 1 -name "lib*" ! -type d ! -name "*.la"`; do \
+      echo "Installing $f"
+      install -m 0755 $f ${STAGING_LIBDIR} ; \
+    done
+
+    if [ -d "${D}${libdir}/gstreamer-1.0" ]; then
+      install -d ${STAGING_LIBDIR}/gstreamer-1.0
+      for f in `find ${D}${libdir}/gstreamer-1.0 -maxdepth 1 -name "lib*" ! -type d ! -name "*.la"` ; do \
+        echo "Installing $f"
+        install -m 0755 $f ${STAGING_LIBDIR}/gstreamer-1.0 ; \
+      done
+    fi
+
+    if [ -d "${D}${libdir}/pkgconfig" ]; then
+      install -d ${STAGING_LIBDIR}/pkgconfig
+      install -m 0644 ${D}${libdir}/pkgconfig/wpe*.pc ${STAGING_LIBDIR}/pkgconfig
+    fi
+
+    cp -r -v ${D}${includedir}/wpe/* ${STAGING_INCDIR}/wpe
+}
+
 do_compile_prepend() {
         export GIR_EXTRA_LIBS_PATH="${B}/gst/.libs:${B}/libs/gst/base/.libs"
 }
-
-FILES_SOLIBSDEV = ""
-SOLIBS = ".so"
-INSANE_SKIP_${PN} += "dev-so"
