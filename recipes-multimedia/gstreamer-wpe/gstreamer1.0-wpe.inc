@@ -39,8 +39,8 @@ CACHED_CONFIGUREVARS += "ac_cv_header_sys_poll_h=no"
 
 PACKAGES += "${PN}-bash-completion"
 
-FILES_${PN} += "${libdir}/gstreamer-1.0/*.so"
-FILES_${PN}-dev += "${libdir}/gstreamer-1.0/*.la ${libdir}/gstreamer-1.0/*.a ${libdir}/gstreamer-1.0/include"
+FILES_${PN} += "${libdir}/gstreamer-1.0-wpe/*.so"
+FILES_${PN}-dev += "${libdir}/gstreamer-1.0-wpe/*.la ${libdir}/gstreamer-1.0-wpe/*.a ${libdir}/gstreamer-1.0/include"
 FILES_${PN}-bash-completion += "${datadir}/bash-completion/completions/ ${datadir}/bash-completion/helpers/gst*"
 
 RRECOMMENDS_${PN}_qemux86 += "kernel-module-snd-ens1370 kernel-module-snd-rawmidi"
@@ -121,14 +121,14 @@ do_populate_sysroot () {
 
     for f in `find ${D}${libdir} -maxdepth 1 -name "lib*" ! -type d` ; do \
       echo "Installing $f"
-      install -m 0755 $f ${STAGING_LIBDIR} ; \
+      cp -av --no-preserve=ownership --preserve=links $f ${STAGING_LIBDIR} ; \
     done
 
-    if [ -d "${D}${libdir}/gstreamer-1.0" ]; then
-      install -d ${STAGING_LIBDIR}/gstreamer-1.0
-      for f in `find ${D}${libdir}/gstreamer-1.0 -maxdepth 1 -name "lib*" ! -type d` ; do \
+    if [ -d "${D}${libdir}/gstreamer-1.0-wpe" ]; then
+      install -d ${STAGING_LIBDIR}/gstreamer-1.0-wpe
+      for f in `find ${D}${libdir}/gstreamer-1.0-wpe -maxdepth 1 -name "lib*" ! -type d` ; do \
         echo "Installing $f"
-         cp -av --no-preserve=ownership --preserve=links $f ${STAGING_LIBDIR}/gstreamer-1.0 ; \
+         cp -av --no-preserve=ownership --preserve=links $f ${STAGING_LIBDIR}/gstreamer-1.0-wpe ; \
       done
     fi
 
@@ -143,3 +143,4 @@ do_populate_sysroot () {
 do_compile_prepend() {
         export GIR_EXTRA_LIBS_PATH="${B}/gst/.libs:${B}/libs/gst/base/.libs"
 }
+

@@ -117,7 +117,7 @@ do_populate_sysroot () {
 
   for f in `find ${D}${libdir} -maxdepth 1 -name "lib*" ! -type d`; do \
     echo "Installing $f"
-    install -m 0755 $f ${STAGING_LIBDIR} ; \
+    cp -av --no-preserve=ownership --preserve=links $f ${STAGING_LIBDIR} ; \
   done
 
   if [ -d "${D}${libdir}/gstreamer-1.0-wpe" ]; then

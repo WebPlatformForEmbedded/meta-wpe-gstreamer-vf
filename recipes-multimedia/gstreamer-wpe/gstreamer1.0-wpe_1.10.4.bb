@@ -22,5 +22,13 @@ do_compile_prepend () {
 }
 
 do_install_prepend () {
-    rm ${B}/pkgconfig/gstreamer-1.0.pc
+    if [ -f "${B}/pkgconfig/gstreamer-1.0.pc" ]; then
+        rm ${B}/pkgconfig/gstreamer-1.0.pc
+    fi
+}
+
+do_install_append () {
+    if [ -d "${D}${libdir}/gstreamer-1.0" ]; then
+        mv -v ${D}${libdir}/gstreamer-1.0 ${D}${libdir}/gstreamer-1.0-wpe
+    fi
 }
