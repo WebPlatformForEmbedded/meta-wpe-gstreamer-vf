@@ -1,4 +1,3 @@
-export LD_LIBRARY_PATH=/usr/lib/wpe:/lib:/usr/lib
 export GST_PLUGIN_SYSTEM_PATH=/usr/lib/wpe/gstreamer-1.0
 export GST_REGISTRY=/tmp/gst-registry.bin
 WPEFramework1
