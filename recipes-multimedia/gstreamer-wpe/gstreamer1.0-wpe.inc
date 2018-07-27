@@ -104,12 +104,13 @@ patch_pc_files () {
 do_configure[prefuncs] += " delete_pkg_m4_file patch_gtk_doc_makefiles patch_pc_files"
 
 FILES_${PN}-dev += "\
-         ${datadir}/gstreamer-wpe \
+         ${includedir}/gstreamer-wpe \
          ${datadir}/girwpe-1.0 \
          "
 
 FILES_${PN} += "\
         ${libdir}/giwperepository-1.0 \
+        ${datadir}/gstreamer-wpe \
         "
 
 do_compile_prepend() {
@@ -128,6 +129,7 @@ do_install_append () {
   fi
 }
 
+EXTRA_OECONF_append=" --datadir=${datadir}/gstreamer-wpe"
 EXTRA_OECONF_append=" --datarootdir=${datadir}/gstreamer-wpe"
 EXTRA_OECONF_append=" --sysconfdir=${sysconfdir}/gstreamer-wpe"
 EXTRA_OECONF_append=" --includedir=${includedir}/gstreamer-wpe"
