@@ -72,12 +72,12 @@ patch_pc_files () {
           file=`echo $f | sed "s/.*\///"` ; \
           pc=`echo $f | sed -r "s/.+\/(.+)\..+/\1/"` ; \
           sed -i \
-              -e "s;/include;/include/wpe;g" \
-              -e "s;/share;/share/wpe;g" \
-              -e "s;/bin;/bin/wpe;g" \
-              -e "s/\@bindir\@/\@bindir\@\/wpe/g" \
-              -e "s/\@libexecdir\@/\@libexecdir\@\/wpe/g" \
-              -e "s/\@includedir\@/\@includedir\@\/wpe/g" \
+              -e "s;pluginsdir=.*;pluginsdir=\@PLUGINDIR\@;g" \
+              -e "s;girdir=.*;girdir=${datadir}/girwpe-1.0;g" \
+              -e "s;typelibdir=.*;typelibdir=${libdir}/giwperepository-1.0;g" \
+              -e "s;datarootdir=.*;datarootdir=${prefix}/share/gstreamer-wpe;g" \
+              -e "s;helpersdir=.*;;g" \
+              -e "s;completionsdir=.*;;g" \
               -e "s;\ gstreamer-;\ wpe-gstreamer-;g" \
               -e "s/lgst/lwpegst/g" \
               $f ; \
@@ -86,11 +86,15 @@ patch_pc_files () {
         sed -i -e "s;pkgconfig/gstreamer;pkgconfig/wpe-gstreamer;g"  ${S}/configure.ac
         sed -i -e s/gstreamer/wpe-gstreamer/g  ${S}/pkgconfig/Makefile.in
         sed -i -e s/gstreamer/wpe-gstreamer/g  ${S}/pkgconfig/Makefile.am
+        # correct plugin install location
+        sed -i -e "s;/gstreamer-\$GST_API_VERSION;/gstreamer-\$\{GST_API_VERSION\}-wpe;g" ${S}/common/m4/gst-plugindir.m4
         #rename libs
         for f in `find ${S} -name Makefile.in -o -name Makefile.am -o -name configure.ac`; do \
           sed -i \
               -e s/libgst/libwpegst/g \
               -e s/lgst/lwpegst/g \
+              -e s/girepository/giwperepository/g \
+              -e s/gir-1.0/girwpe-1.0/g \
               $f ; \
         done
         touch ${S}/patch_pc_files.done
@@ -100,47 +104,31 @@ patch_pc_files () {
 do_configure[prefuncs] += " delete_pkg_m4_file patch_gtk_doc_makefiles patch_pc_files"
 
 FILES_${PN}-dev += "\
-         ${datadir}/wpe \
+         ${datadir}/gstreamer-wpe \
+         ${datadir}/girwpe-1.0 \
          "
 
-do_install_append () {
-    install -d ${D}${bindir}/wpe
-    install -d ${D}${includedir}/wpe
-    install -d ${D}${libexecdir}/wpe
-    install -d ${D}${datadir}/wpe
-    find ${D}${bindir} -maxdepth 1 ! -name wpe -exec mv -v  {} ${D}${bindir}/wpe \;
-    find ${D}${includedir} -maxdepth 1 ! -name wpe -exec mv -v  {} ${D}${includedir}/wpe \;
-    find ${D}${libexecdir} -maxdepth 1 ! -name wpe -exec mv -v  {} ${D}${libexecdir}/wpe \;
-    find ${D}${datadir} -maxdepth 1 ! -name wpe -exec mv -v  {} ${D}${datadir}/wpe \;
-}
-
-do_populate_sysroot () {
-    install -d ${STAGING_LIBDIR}
-    install -d ${STAGING_LIBDIR}/pkgconfig
-    install -d ${STAGING_INCDIR}/wpe
-
-    for f in `find ${D}${libdir} -maxdepth 1 -name "lib*" ! -type d` ; do \
-      echo "Installing $f"
-      cp -av --no-preserve=ownership --preserve=links $f ${STAGING_LIBDIR} ; \
-    done
-
-    if [ -d "${D}${libdir}/gstreamer-1.0-wpe" ]; then
-      install -d ${STAGING_LIBDIR}/gstreamer-1.0-wpe
-      for f in `find ${D}${libdir}/gstreamer-1.0-wpe -maxdepth 1 -name "lib*" ! -type d` ; do \
-        echo "Installing $f"
-         cp -av --no-preserve=ownership --preserve=links $f ${STAGING_LIBDIR}/gstreamer-1.0-wpe ; \
-      done
-    fi
-
-    if [ -d "${D}${libdir}/pkgconfig" ]; then
-      install -d ${STAGING_LIBDIR}/pkgconfig
-      install -m 0644 ${D}${libdir}/pkgconfig/wpe*.pc ${STAGING_LIBDIR}/pkgconfig
-    fi
-
-    cp -r -v ${D}${includedir}/wpe/* ${STAGING_INCDIR}/wpe
-}
+FILES_${PN} += "\
+        ${libdir}/giwperepository-1.0 \
+        "
 
 do_compile_prepend() {
         export GIR_EXTRA_LIBS_PATH="${B}/gst/.libs:${B}/libs/gst/base/.libs"
 }
 
+do_install_append () {
+  if [ -d "${D}${datadir}/man" ]; then
+    rm -rf  "${D}${datadir}/man"
+  fi
+  if [ -d "${D}${datadir}/aclocal" ]; then
+    rm -rf  "${D}${datadir}/aclocal"
+  fi
+  if [ -d "${D}${datadir}/bash-completion" ]; then
+    rm -rf  "${D}${datadir}/bash-completion"
+  fi
+}
+
+EXTRA_OECONF_append=" --datarootdir=${datadir}/gstreamer-wpe"
+EXTRA_OECONF_append=" --sysconfdir=${sysconfdir}/gstreamer-wpe"
+EXTRA_OECONF_append=" --includedir=${includedir}/gstreamer-wpe"
+EXTRA_OECONF_append=" --program-prefix wpe"
