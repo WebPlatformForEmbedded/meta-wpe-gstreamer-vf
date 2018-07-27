@@ -56,7 +56,7 @@ RDEPS_EXTRA = " \
     gstreamer1.0-wpe-plugins-ugly-mpg123 \
 "
 
-RDEPS_EXTRA_append_rpi = " \
+RDEPENDS_${PN}_rpi += " \
     gstreamer1.0-omx \
     gstreamer1.0-wpe-plugins-bad-opengl \
 "
