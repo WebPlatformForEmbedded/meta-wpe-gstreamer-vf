@@ -35,8 +35,34 @@ set_omx_core_name() {
 
 do_install[postfuncs] += " set_omx_core_name "
 
-FILES_${PN} += "${libdir}/gstreamer-1.0/*.so"
-FILES_${PN}-dev += "${libdir}/gstreamer-1.0/*.la"
-FILES_${PN}-staticdev += "${libdir}/gstreamer-1.0/*.a"
+FILES_${PN} += "${libdir}/gstreamer-1.0-wpe/*.so"
+FILES_${PN}-dev += "${libdir}/gstreamer-1.0-wpe/*.la"
+FILES_${PN}-staticdev += "${libdir}/gstreamer-1.0-wpe/*.a"
 
 RDEPENDS_${PN} = "libomxil"
+
+patch_make_files () {
+        if [ ! -f ${S}/patch_make_files.done ]; then
+        sed -i -e s/\ gstreamer/\ wpe-gstreamer/g ${S}/common/m4/gst-check.m4
+        sed -i -e s/prefix\ gstreamer/prefix\ wpe-gstreamer/g  ${S}/configure.ac
+        # correct plugin install location
+        sed -i -e "s;/gstreamer-\$GST_API_VERSION;/gstreamer-\$\{GST_API_VERSION\}-wpe;g" ${S}/common/m4/gst-plugindir.m4
+        #rename libs
+        for f in `find ${S} -name Makefile.in -o -name Makefile.am -o -name configure.ac`; do \
+          sed -i \
+              -e s/libgst/libwpegst/g \
+              -e s/lgst/lwpegst/g \
+              -e s/girepository/giwperepository/g \
+              -e s/gir-1.0/girwpe-1.0/g \
+              $f ; \
+        done
+        touch ${S}/patch_make_files.done
+        fi
+}
+
+do_configure[prefuncs] += " patch_make_files"
+
+EXTRA_OECONF_append=" --datadir=${datadir}/gstreamer-wpe"
+EXTRA_OECONF_append=" --datarootdir=${datadir}/gstreamer-wpe"
+#EXTRA_OECONF_append=" --sysconfdir=${sysconfdir}/gstreamer-wpe"
+EXTRA_OECONF_append=" --includedir=${includedir}/gstreamer-wpe"
