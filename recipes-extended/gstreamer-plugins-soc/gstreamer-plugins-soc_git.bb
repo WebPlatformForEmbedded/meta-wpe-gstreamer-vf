@@ -16,7 +16,7 @@ S = "${WORKDIR}/git"
 
 inherit autotools pkgconfig
 
-PACKAGECONFIG ?= "${@base_contains('WITH_SVP', 'y', 'svp', ' ', d)}"
+PACKAGECONFIG ?= "${@bb.utils.contains('WITH_SVP', 'y', 'svp', ' ', d)}"
 PACKAGECONFIG[svp]  = "--enable-svp,,"
 
 EXTRA_OECONF += " \
