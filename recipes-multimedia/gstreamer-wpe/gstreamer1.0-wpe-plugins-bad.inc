@@ -175,8 +175,8 @@ do_configure[prefuncs] += " extra_patch_files_gst_plugins_bad"
 
 do_install_append () {
   if [ -f ${D}${libdir}/gstreamer-${LIBV}/include/gst/gl/gstglconfig.h ]; then
-    install -d ${D}${libdir}/gstreamer-${LIBV}-wpe/include/gst/gl
-    mv ${D}${libdir}/gstreamer-${LIBV}/include/gst/gl/gstglconfig.h ${D}${libdir}/gstreamer-${LIBV}-wpe/include/gst/gl
+    install -d ${D}${includedir}/gstreamer-wpe/gstreamer-${LIBV}/gst/gl
+    mv ${D}${libdir}/gstreamer-${LIBV}/include/gst/gl/gstglconfig.h ${D}${includedir}/gstreamer-wpe/gstreamer-${LIBV}/gst/gl
     rm -rf ${D}${libdir}/gstreamer-${LIBV}
   fi
 }
