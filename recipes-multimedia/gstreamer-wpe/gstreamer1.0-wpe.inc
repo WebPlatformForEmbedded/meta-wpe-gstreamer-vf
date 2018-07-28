@@ -97,6 +97,9 @@ patch_pc_files () {
               -e s/gir-1.0/girwpe-1.0/g \
               $f ; \
         done
+        sed -i -e "s;gst-plugin-scanner;wpegst-plugin-scanner;g" ${S}/configure.ac
+        sed -i -e "s;gst-plugin-scanner;wpegst-plugin-scanner;g" ${S}/gst/Makefile.am
+        sed -i -e "s;gst-ptp-helper;wpegst-ptp-helper;g" ${S}/configure.ac
         touch ${S}/patch_pc_files.done
         fi
 }
