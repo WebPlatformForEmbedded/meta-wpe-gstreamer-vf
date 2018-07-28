@@ -100,6 +100,7 @@ patch_pc_files () {
         sed -i -e "s;gst-plugin-scanner;wpegst-plugin-scanner;g" ${S}/configure.ac
         sed -i -e "s;gst-plugin-scanner;wpegst-plugin-scanner;g" ${S}/gst/Makefile.am
         sed -i -e "s;gst-ptp-helper;wpegst-ptp-helper;g" ${S}/configure.ac
+        sed -i -e "s;gst-ptp-helper;wpegst-ptp-helper;g" ${S}/libs/gst/net/Makefile.am
         touch ${S}/patch_pc_files.done
         fi
 }
