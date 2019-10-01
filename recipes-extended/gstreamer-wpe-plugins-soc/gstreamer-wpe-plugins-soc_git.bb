@@ -1,16 +1,15 @@
 SUMMARY = "Gstreamer SOC specific plugins for Broadcom"
 LICENSE = "CLOSED"
-PV = "17.1+git${SRCPV}"
+PV = "18.1+git${SRCPV}"
 
-# Removed broadcom-refsw for the time being, should be added back again towards the end
-DEPENDS = " gstreamer1.0-wpe gstreamer1.0-wpe-plugins-base mpg123 curl"
+DEPENDS = " gstreamer1.0-wpe gstreamer1.0-wpe-plugins-base mpg123 curl broadcom-refsw"
 RDEPENDS_${PN} = "mpg123"
 
-PROVIDES = "virtual/gst-plugins-playersinkbin"
-RPROVIDES_${PN} = "virtual/gst-plugins-playersinkbin"
+PROVIDES = "virtual/gst-wpe-plugins-playersinkbin"
+RPROVIDES_${PN} = "virtual/gst-wpe-plugins-playersinkbin"
 
-SRC_URI = "git://git@github.com/Metrological/gstreamer-plugins-soc.git;protocol=ssh;branch=17.1-rdkfix"
-SRCREV = "1856b04e46d53da16cc5469279c0497fa13ce6d2"
+SRC_URI = "git://git@github.com/Metrological/gstreamer-plugins-soc.git;protocol=ssh;branch=18.1-rdkv-20180416"
+SRCREV = "f04be4486828700bb921ec557f8d109a44fe02da"
 
 S = "${WORKDIR}/git"
 
