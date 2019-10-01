@@ -32,3 +32,8 @@ EXTRA_OECONF_append=" --datadir=${datadir}/gstreamer-wpe"
 EXTRA_OECONF_append=" --datarootdir=${datadir}/gstreamer-wpe"
 #EXTRA_OECONF_append=" --sysconfdir=${sysconfdir}/gstreamer-wpe"
 EXTRA_OECONF_append=" --includedir=${includedir}/gstreamer-wpe"
+
+# Needed for libocdm svp adapter
+do_install_append() {
+	install -m 0644 ${S}/svpmeta/src/gst_brcm_svp_meta.h ${D}/${includedir}
+}
