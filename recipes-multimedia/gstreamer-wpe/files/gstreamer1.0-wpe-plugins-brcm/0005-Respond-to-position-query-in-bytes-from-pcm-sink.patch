@@ -1,0 +1,41 @@
+From 780cf634bca975302f0eb6afb32f48a328afca14 Mon Sep 17 00:00:00 2001
+From: krp97 <k.plata576@gmail.com>
+Date: Tue, 27 Jul 2021 12:11:51 +0000
+Subject: [PATCH 5/5] Respond to position query in bytes from pcm sink
+
+This commit adds handling for a GST_QUERY_POSITION, in FORMAT_BYTES.
+This information is used by an audio pcm-sink pipeline client,
+to calculate how many frames of content have been displayed to the user.
+---
+ reference/pcmsink/src/gst_pcm_sink.c | 15 ++++++++++++++-
+ 1 file changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/reference/pcmsink/src/gst_pcm_sink.c b/reference/pcmsink/src/gst_pcm_sink.c
+index b5ec1ff..777945a 100644
+--- a/reference/pcmsink/src/gst_pcm_sink.c
++++ b/reference/pcmsink/src/gst_pcm_sink.c
+@@ -1045,7 +1045,20 @@ static gboolean gst_brcm_pcm_sink_query (GstElement *element, GstQuery *query) {
+         gst_query_set_latency(query, FALSE, 0, 10*1000*1000);
+         return TRUE;
+ 
+-      case GST_QUERY_POSITION:
++      case GST_QUERY_POSITION:{
++        GstFormat queryFormat;
++        gst_query_parse_position(query, &queryFormat, NULL);
++        if (sink->audio_playback && queryFormat == GST_FORMAT_BYTES) {
++            NEXUS_SimpleAudioPlaybackStatus playbackStatus;
++            NEXUS_Error rc = NEXUS_SimpleAudioPlayback_GetStatus(sink->audio_playback, &playbackStatus);
++            if (rc != NEXUS_SUCCESS) {
++                GST_ERROR("NEXUS_SimpleAudioPlayback_GetStatus failed (rc=%d)", rc);
++            } else {
++                gst_query_set_position(query, GST_FORMAT_BYTES, playbackStatus.playedBytes);
++                return TRUE;
++            }
++        } // fall-through!
++      }
+       case GST_QUERY_DURATION:
+       case GST_QUERY_SEEKING:
+       case GST_QUERY_RATE:
+-- 
+2.7.4
+
