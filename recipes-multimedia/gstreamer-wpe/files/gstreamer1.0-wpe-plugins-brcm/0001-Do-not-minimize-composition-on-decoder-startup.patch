@@ -1,0 +1,47 @@
+From 8ec2a29f17f5b93425335b851d8718639b0a0f0c Mon Sep 17 00:00:00 2001
+From: krp97 <k.plata576@gmail.com>
+Date: Wed, 21 Jul 2021 11:29:51 +0000
+Subject: [PATCH 1/5] Do not minimize composition on decoder startup
+
+This commit removes changes, that keep the composition surface
+minimized, until the video sink resizes it.
+
+During a state change READY->PAUSED, the decoder nexus handle is not
+available from a video sink element. This means that the resize and
+reposition call on that state change will not execute, resulting
+in a black screen in a paused state.
+
+It is desired for the first frame of an asset to show up, on a state
+change READY -> PAUSED.
+---
+ reference/videodecode/src/gst_brcm_video_decoder.c | 14 +++++++-------
+ 1 file changed, 7 insertions(+), 7 deletions(-)
+
+diff --git a/reference/videodecode/src/gst_brcm_video_decoder.c b/reference/videodecode/src/gst_brcm_video_decoder.c
+index 75af9d0..5655f2f 100755
+--- a/reference/videodecode/src/gst_brcm_video_decoder.c
++++ b/reference/videodecode/src/gst_brcm_video_decoder.c
+@@ -561,13 +561,13 @@ static NEXUS_Error nexus_alloc(GstBrcmVideoDecoder *decoder)
+         return NEXUS_NOT_INITIALIZED;
+     }
+ 
+-    /* keep the video surface size minimun until it is set by videosink */
+-    NxClient_GetSurfaceClientComposition(decoder->surface_client_id, &comp);
+-    comp.position.x = 0;
+-    comp.position.y = 0;
+-    comp.position.width = 0;
+-    comp.position.height = 0;
+-    NxClient_SetSurfaceClientComposition(decoder->surface_client_id, &comp);
++    // /* keep the video surface size minimun until it is set by videosink */
++    // NxClient_GetSurfaceClientComposition(decoder->surface_client_id, &comp);
++    // comp.position.x = 0;
++    // comp.position.y = 0;
++    // comp.position.width = 0;
++    // comp.position.height = 0;
++    // NxClient_SetSurfaceClientComposition(decoder->surface_client_id, &comp);
+ 
+     /* set to zorder 1 to avoid flickering */
+     NxClient_GetSurfaceClientComposition(decoder->surface_client_id, &surfaceComposition);
+-- 
+2.7.4
+
