@@ -10,7 +10,7 @@ SRC_URI_append = " \
     git://code.rdkcentral.com/r/collaboration/rdk/components/generic/gst-plugins-soc/soc/broadcom;protocol=https;branch=master \
     file://0001-Do-not-minimize-composition-on-decoder-startup.patch \
     file://0002-Revert-BCMCZ-121-remove-gstsvpmeta.h.patch \
-    file://0003-Remove-condition-for-pausing-resuming-the-STC.patch \
+    file://0003-Adjust-condition-for-freezing-the-system-clock.patch \
     file://0004-Changes-to-STC-for-audio-glitches.patch \
     file://0005-Respond-to-position-query-in-bytes-from-pcm-sink.patch \
 "
