@@ -10,10 +10,10 @@ PROVIDES_append = " \
     gstreamer-plugins-soc \
 "
 
+PV = "1.0+git${SRCPV}"
 GST_BCM_VERSION_BRANCH ??= "master"
 SRC_URI = "git://git@github.com/Metrological/bcm-gstreamer.git;protocol=ssh;branch=${GST_BCM_VERSION_BRANCH}"
 SRCREV ??= "b6fb7c3bc1842028705ac4d4a8f15e25c0c5ab08"
-
 S = "${WORKDIR}/git"
 
 inherit autotools pkgconfig gettext
