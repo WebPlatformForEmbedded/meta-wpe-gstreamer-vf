@@ -1,6 +1,6 @@
-From ec07c49ae913e81a75911649f557a3f819849fbb Mon Sep 17 00:00:00 2001
-From: krp97 <k.plata@metrological.com>
-Date: Mon, 30 Aug 2021 09:18:01 +0000
+From 44af503b6dfdd2ef238ed55d77ac69c0b3f52e82 Mon Sep 17 00:00:00 2001
+From: krp97 <k.plata576@gmail.com>
+Date: Thu, 12 Aug 2021 07:40:26 +0000
 Subject: [PATCH] Adjust condition for freezing the system clock
 
 This patch removes a condition that prevents the STC from going
@@ -15,69 +15,58 @@ is started which results in ~1s of buffers being displayed
 
 TODO: File this as an issue with bcm and investigate further.
 ---
- reference/audiodecode/src/gst_brcm_audio_decoder.c |  5 ++++-
- reference/util/src/gst_system_clock.c              | 19 +++----------------
- reference/util/src/gst_system_clock.h              |  1 -
- 3 files changed, 7 insertions(+), 18 deletions(-)
+ reference/audiodecode/src/gst_brcm_audio_decoder.c |  6 ------
+ reference/util/src/gst_system_clock.c              | 16 ++++++----------
+ 2 files changed, 6 insertions(+), 16 deletions(-)
 
 diff --git a/reference/audiodecode/src/gst_brcm_audio_decoder.c b/reference/audiodecode/src/gst_brcm_audio_decoder.c
-index 2a95a3a..ed1176b 100755
+index 2a95a3a..124732a 100755
 --- a/reference/audiodecode/src/gst_brcm_audio_decoder.c
 +++ b/reference/audiodecode/src/gst_brcm_audio_decoder.c
-@@ -1258,7 +1258,10 @@ static void gst_brcm_audio_decoder_start(GstBrcmAudioDecoder *decoder)
-         ts.rate = decoder->rate;
-         ts.tsmEnabled = (decoder->rate == NEXUS_NORMAL_DECODE_RATE) ? TRUE:FALSE;
-         NEXUS_SimpleAudioDecoder_SetTrickState(decoder->audio_decoder, &ts);
+@@ -1314,12 +1314,6 @@ static GstStateChangeReturn gst_brcm_audio_decoder_change_state(GstElement *elem
+             GST_LOG("transition READY_TO_PAUSED - Invalid Audio codec. Retry on sink set caps");
+             break;
+         }
 -
-+        /* this won't start during paused->playing since the decoder state is still paused, but audio sink will thaw STC when it receives paused->playing */
-+        if (GST_STATE(GST_ELEMENT(decoder)) != GST_STATE_PLAYING && decoder->stc_channel) {
-+            NEXUS_SimpleStcChannel_Freeze(decoder->stc_channel, TRUE);
-+        }
-         gst_brcm_audio_smooth_mute(decoder, false);
-         decoder->nexus_decoder_started = TRUE;
+-        BRCM_G_MUTEX_LOCK(decoder->mutex);
+-        gst_brcm_audio_decoder_start(decoder);
+-
+-        GST_LOG("transition: READY_TO_PAUSED");
+-        BRCM_G_MUTEX_UNLOCK(decoder->mutex);
+         break;
      }
+     case GST_STATE_CHANGE_PAUSED_TO_PLAYING:
 diff --git a/reference/util/src/gst_system_clock.c b/reference/util/src/gst_system_clock.c
-index 0ba502b..ee0f6dc 100755
+index 0ba502b..79a8a73 100755
 --- a/reference/util/src/gst_system_clock.c
 +++ b/reference/util/src/gst_system_clock.c
-@@ -182,22 +182,9 @@ void gst_brcm_system_clock_freeze_stc_channel(NEXUS_SimpleStcChannelHandle stc_c
-     if (i==MAX_STC_CHANNELS) {
+@@ -183,20 +183,16 @@ void gst_brcm_system_clock_freeze_stc_channel(NEXUS_SimpleStcChannelHandle stc_c
          BDBG_WRN(("Stc channel not found"));
      } else {
--        if (freeze) {
+         if (freeze) {
 -            if (!sysclock.clock[token_id].frozen[SYS_CLK_CLIENT_VIDEO] && !sysclock.clock[token_id].frozen[SYS_CLK_CLIENT_AUDIO]){
 -                NEXUS_Error rc = NEXUS_SimpleStcChannel_Freeze(stc_channel, true);
 -                if (rc) {
 -                    BDBG_WRN(("NEXUS_SimpleStcChannel_Freeze failed %d", GST_FUNCTION,__LINE__, rc));
 -                }
--            }
--            sysclock.clock[token_id].frozen[sys_clk_client] = true;
--        } else { /* freeze == 0 */
--            sysclock.clock[token_id].frozen[sys_clk_client] = false;
++            NEXUS_Error rc = NEXUS_SimpleStcChannel_Freeze(stc_channel, true);
++            if (rc) {
++                BDBG_WRN(("NEXUS_SimpleStcChannel_Freeze failed %d", GST_FUNCTION,__LINE__, rc));
+             }
+             sysclock.clock[token_id].frozen[sys_clk_client] = true;
+         } else { /* freeze == 0 */
+             sysclock.clock[token_id].frozen[sys_clk_client] = false;
 -            if (!sysclock.clock[token_id].frozen[SYS_CLK_CLIENT_VIDEO] && !sysclock.clock[token_id].frozen[SYS_CLK_CLIENT_AUDIO]){
 -                NEXUS_Error rc = NEXUS_SimpleStcChannel_Freeze(stc_channel, false);
 -                if (rc) {
 -                    BDBG_WRN(("NEXUS_SimpleStcChannel_Freeze failed %d", GST_FUNCTION,__LINE__, rc));
 -                }
--            }
-+        NEXUS_Error rc = NEXUS_SimpleStcChannel_Freeze(stc_channel, freeze);
-+        if (rc) {
-+            BDBG_WRN(("NEXUS_SimpleStcChannel_Freeze failed %d", GST_FUNCTION,__LINE__, rc));
++            NEXUS_Error rc = NEXUS_SimpleStcChannel_Freeze(stc_channel, false);
++            if (rc) {
++                BDBG_WRN(("NEXUS_SimpleStcChannel_Freeze failed %d", GST_FUNCTION,__LINE__, rc));
+             }
          }
      }
-     BRCM_G_MUTEX_UNLOCK(clock_mutex);
-diff --git a/reference/util/src/gst_system_clock.h b/reference/util/src/gst_system_clock.h
-index 6486921..54611d2 100644
---- a/reference/util/src/gst_system_clock.h
-+++ b/reference/util/src/gst_system_clock.h
-@@ -60,7 +60,6 @@ typedef struct SystemClock {
-     NEXUS_SimpleStcChannelHandle stc_channel;
-     unsigned int token;
-     unsigned int ref_count;
--    bool frozen[SYS_CLK_CLIENT_MAX];
- }Clock;
- 
- struct _GstBrcmSystemClock {
 -- 
 2.7.4
 
