@@ -11,8 +11,9 @@ SRC_URI_append = " \
     file://0001-Do-not-minimize-composition-on-decoder-startup.patch \
     file://0002-Revert-BCMCZ-121-remove-gstsvpmeta.h.patch \
     file://0003-Adjust-condition-for-freezing-the-system-clock.patch \
-    file://0004-Changes-to-STC-for-audio-glitches.patch \
-    file://0005-BCMCZ-354-Position-query-handling-in-pcmsink.patch \
+    file://0004-BCMCZ-359-Add-configuration-of-discard-thresholds.patch \
+    file://0005-BCMCZ-358-Allow-for-configuring-STC-mode.patch \
+    file://0006-BCMCZ-354-Position-query-handling-in-pcmsink.patch \
 "
 
 SRCREV = "6c27372afb3ed20eab1e6d35ba54225e778f39f8"

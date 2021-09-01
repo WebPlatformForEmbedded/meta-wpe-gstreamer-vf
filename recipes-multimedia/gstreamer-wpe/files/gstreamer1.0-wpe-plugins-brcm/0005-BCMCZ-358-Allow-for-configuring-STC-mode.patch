@@ -1,0 +1,40 @@
+From 577c5b3a6970006acad53af736d5ad9b170e5154 Mon Sep 17 00:00:00 2001
+From: Krystian Plata <k.plata@metrological.com>
+Date: Mon, 30 Aug 2021 13:26:04 +0000
+Subject: [PATCH] BCMCZ-358 Allow for configuring STC mode
+
+This commit introduces handling for GST_BRCM_STC_MODE, which allows for
+configuring which stream drives the systems clock. Available modes are:
+first, audio, video, max.
+
+Change-Id: I2e1e9b423c77a05a9a599358b65bc0136880fd53
+---
+ reference/util/src/gst_system_clock.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/reference/util/src/gst_system_clock.c b/reference/util/src/gst_system_clock.c
+index a3f1696..ce14076 100755
+--- a/reference/util/src/gst_system_clock.c
++++ b/reference/util/src/gst_system_clock.c
+@@ -61,6 +61,18 @@ static void gst_brcm_system_clock_get_stc_channel(unsigned int token_id){
+ 
+     NEXUS_SimpleStcChannel_GetDefaultSettings(&stcSettings);
+     stcSettings.mode = NEXUS_StcChannelMode_eAuto;
++
++    const gchar *stcModeEnv = g_getenv ("GST_BRCM_STC_MODE");
++    if (stcModeEnv != NULL) {
++        if (!strcmp("first", stcModeEnv)) {
++            stcSettings.modeSettings.Auto.behavior = NEXUS_StcChannelAutoModeBehavior_eFirstAvailable;
++        } else if (!strcmp("audio", stcModeEnv)) {
++            stcSettings.modeSettings.Auto.behavior = NEXUS_StcChannelAutoModeBehavior_eAudioMaster;
++        } else if (!strcmp("video", stcModeEnv)) {
++            stcSettings.modeSettings.Auto.behavior = NEXUS_StcChannelAutoModeBehavior_eVideoMaster;
++        }
++    }
++
+     sysclock.clock[token_id].stc_channel = NEXUS_SimpleStcChannel_Create(&stcSettings);
+     BDBG_ASSERT(sysclock.clock[token_id].stc_channel);
+ 
+-- 
+2.7.4
+
