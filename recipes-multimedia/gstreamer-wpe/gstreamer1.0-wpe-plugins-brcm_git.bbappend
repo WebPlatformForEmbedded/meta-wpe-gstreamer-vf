@@ -12,7 +12,7 @@ SRC_URI_append = " \
     file://0002-Revert-BCMCZ-121-remove-gstsvpmeta.h.patch \
     file://0003-Adjust-condition-for-freezing-the-system-clock.patch \
     file://0004-Changes-to-STC-for-audio-glitches.patch \
-    file://0005-Respond-to-position-query-in-bytes-from-pcm-sink.patch \
+    file://0005-BCMCZ-354-Position-query-handling-in-pcmsink.patch \
 "
 
 SRCREV = "6c27372afb3ed20eab1e6d35ba54225e778f39f8"

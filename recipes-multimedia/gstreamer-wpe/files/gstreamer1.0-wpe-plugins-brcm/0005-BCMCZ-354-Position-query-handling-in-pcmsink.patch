@@ -1,11 +1,13 @@
-From 780cf634bca975302f0eb6afb32f48a328afca14 Mon Sep 17 00:00:00 2001
-From: krp97 <k.plata576@gmail.com>
+From 82afc0c9bab06f8ed9b4daf97703444451aeabd6 Mon Sep 17 00:00:00 2001
+From: Krystian Plata <k.plata@metrological.com>
 Date: Tue, 27 Jul 2021 12:11:51 +0000
-Subject: [PATCH 5/5] Respond to position query in bytes from pcm sink
+Subject: [PATCH] BCMCZ-354 Position query handling in pcmsink.
 
-This commit adds handling for a GST_QUERY_POSITION, in FORMAT_BYTES.
-This information is used by an audio pcm-sink pipeline client,
-to calculate how many frames of content have been displayed to the user.
+This commit adds handling for a position query bytes format.
+This information can be used by an audio only client, to determine
+the amount of frames played by the pipeline.
+
+Change-Id: I4ccec8f548690d86d5a4873c4f65f8e146a2e508
 ---
  reference/pcmsink/src/gst_pcm_sink.c | 15 ++++++++++++++-
  1 file changed, 14 insertions(+), 1 deletion(-)
