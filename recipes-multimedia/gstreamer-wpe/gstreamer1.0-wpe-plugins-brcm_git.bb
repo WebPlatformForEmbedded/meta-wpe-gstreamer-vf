@@ -10,7 +10,15 @@ PROVIDES_append = " \
     gstreamer-plugins-soc \
 "
 
-PV = "1.0+git${SRCPV}"
+def get_metalayer_sha(d):
+    layers = (d.getVar("BBLAYERS", True) or "").split()
+    layer_shas = [base_get_metadata_git_revision(layer, None) for layer in layers if layer.endswith("meta-wpe-gstreamer-vf")]
+    version="%s" % (layer_shas[0][:7])
+    return version
+
+
+PV = "1.0+git${SRCPV}-${@get_metalayer_sha(d)}"
+
 GST_BCM_VERSION_BRANCH ??= "master"
 SRC_URI = "git://git@github.com/Metrological/bcm-gstreamer.git;protocol=ssh;branch=${GST_BCM_VERSION_BRANCH}"
 SRCREV ??= "b6fb7c3bc1842028705ac4d4a8f15e25c0c5ab08"
