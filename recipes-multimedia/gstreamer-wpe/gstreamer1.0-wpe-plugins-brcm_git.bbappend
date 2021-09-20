@@ -11,12 +11,9 @@ SRC_URI_append = " \
     file://0001-Do-not-minimize-composition-on-decoder-startup.patch \
     file://0002-Revert-BCMCZ-121-remove-gstsvpmeta.h.patch \
     file://0003-Configure-sinks-to-use-the-async-mode.patch \
-    file://0004-BCMCZ-359-Add-configuration-of-discard-thresholds.patch \
-    file://0005-BCMCZ-358-Allow-for-configuring-STC-mode.patch \
-    file://0006-BCMCZ-354-Position-query-handling-in-pcmsink.patch \
 "
 
-SRCREV = "6c27372afb3ed20eab1e6d35ba54225e778f39f8"
+SRCREV = "5534aa56dfea8d3758db59753c539f0be1dba03d"
 
 patch_pc_files () {
     for f in `find ${S} -name Makefile.in -o -name Makefile.am -o -name configure.ac`; do \
