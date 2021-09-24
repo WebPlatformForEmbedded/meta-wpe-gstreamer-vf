@@ -48,7 +48,6 @@ RDEPS_WPE_EXTRA = " \
     gstreamer1.0-wpe-plugins-good-matroska \
     gstreamer1.0-wpe-plugins-bad-dashdemux \
     gstreamer1.0-wpe-plugins-bad-hls \
-    gstreamer1.0-wpe-plugins-bad-faad \
     gstreamer1.0-wpe-plugins-bad-mpegtsdemux \
     gstreamer1.0-wpe-plugins-bad-opusparse \
     gstreamer1.0-wpe-plugins-bad-smoothstreaming \
