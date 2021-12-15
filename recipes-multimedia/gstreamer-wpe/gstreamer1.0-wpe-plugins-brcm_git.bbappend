@@ -37,3 +37,11 @@ EXTRA_OECONF += "\
 "
 
 do_configure[prefuncs] += " patch_pc_files"
+
+do_install_append () {
+    install -m 0644 ${S}/reference/svpmeta/src/gst_brcm_svp_meta.h ${D}/${includedir}
+}
+
+FILES_${PN}-dev += "\
+    ${includedir}/* \
+"
