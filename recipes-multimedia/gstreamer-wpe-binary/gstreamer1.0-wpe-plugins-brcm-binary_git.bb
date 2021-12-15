@@ -11,12 +11,12 @@ LICENSE = "CLOSED"
 PROVIDES_append = " gstreamer1.0-wpe-plugins-brcm"
 
 # inherit PV from original recipe
-PV = "1.0+gitAUTOINC+5534aa56df-1d03ddc-r0"
+PV = "1.0+gitAUTOINC+5534aa56df-a027cc2-r0"
 SRC_URI = " \
-    file://gstreamer1.0-wpe-plugins-brcm-1.0+gitAUTOINC+5534aa56df-1d03ddc-r0.tar.gz;subdir=binaries-source \
+    file://gstreamer1.0-wpe-plugins-brcm-1.0+gitAUTOINC+5534aa56df-a027cc2-r0.tar.gz;subdir=binaries-source \
 "
-SRC_URI[md5sum] = "26ee8bd229da6ec7b2a0f89100d2d228"
-SRC_URI[sha256sum] = "7d3e985a9a5d4198f9f636c1e2ba4cbb5af664b8f3c3afcdb1536823f8ec8db7"
+SRC_URI[md5sum] = "cd222c22f82bd3732aeef8666429322d"
+SRC_URI[sha256sum] = "93bde0e2a056ee8770885927740f775866f478defc882b7675a9cca844b7b23c"
 
 S = "${WORKDIR}/binaries-source"
 
@@ -35,6 +35,7 @@ FILES_${PN}_append = " \
  "
 FILES_${PN}-dev_append = " \
     ${includedir}/gstreamer-wpe/gst_brcm_svp_meta.h \
+    ${includedir}/gst_brcm_svp_meta.h \
     ${libdir}/gstreamer-1.0-wpe/libbrcmvidfilter.la \
     ${libdir}/gstreamer-1.0-wpe/libbrcmpcmsink.la \
     ${libdir}/gstreamer-1.0-wpe/libbrcmgstutil.la \
