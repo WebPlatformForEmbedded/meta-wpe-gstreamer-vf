@@ -8,7 +8,7 @@ PACKAGECONFIG_append = "svp"
 SRC_URI_remove = "git://git@github.com/Metrological/bcm-gstreamer.git;protocol=ssh;branch=${GST_BCM_VERSION_BRANCH}"
 SRC_URI_append = " \
     git://code.rdkcentral.com/r/collaboration/rdk/components/generic/gst-plugins-soc/soc/broadcom;protocol=https;branch=master \
-    file://0001-Do-not-minimize-composition-on-decoder-startup.patch \
+    file://0001-BCMCZ-365-Retry-resize-of-video-surface-in-preroll.patch \
     file://0002-Revert-BCMCZ-121-remove-gstsvpmeta.h.patch \
     file://0003-Configure-sinks-to-use-the-async-mode.patch \
     file://0004-BCMCZ-375-Freeze-STC-regardless-of-the-client.patch \
