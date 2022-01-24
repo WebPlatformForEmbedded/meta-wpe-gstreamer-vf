@@ -11,12 +11,12 @@ LICENSE = "CLOSED"
 PROVIDES_append = " gstreamer1.0-wpe-plugins-brcm"
 
 # inherit PV from original recipe
-PV = "1.0+gitAUTOINC+5534aa56df-a027cc2-r0"
+PV = "1.0+gitAUTOINC+5534aa56df-71bdefa-r0"
 SRC_URI = " \
-    file://gstreamer1.0-wpe-plugins-brcm-1.0+gitAUTOINC+5534aa56df-a027cc2-r0.tar.gz;subdir=binaries-source \
+    file://gstreamer1.0-wpe-plugins-brcm-1.0+gitAUTOINC+5534aa56df-71bdefa-r0.tar.gz;subdir=binaries-source \
 "
-SRC_URI[md5sum] = "cd222c22f82bd3732aeef8666429322d"
-SRC_URI[sha256sum] = "93bde0e2a056ee8770885927740f775866f478defc882b7675a9cca844b7b23c"
+SRC_URI[md5sum] = "c62f34bb0fe42d58929d422844d74467"
+SRC_URI[sha256sum] = "fc6e244a9ac49b51abbcff2caba8e3d1acf0ee9ac1f6b6bd65b9ada9e6117674"
 
 S = "${WORKDIR}/binaries-source"
 
