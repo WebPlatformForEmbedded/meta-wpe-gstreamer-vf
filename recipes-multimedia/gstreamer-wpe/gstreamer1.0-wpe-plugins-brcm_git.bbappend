@@ -14,6 +14,7 @@ SRC_URI_append = " \
     file://0004-BCMCZ-368-SWRDKV-3139-Gravity-UI-can-t-play-web-vide.patch \
     file://0005-BCMCZ-376-Don-t-flush-on-new-segment-event.patch \
     file://0006-BCMCZ-377-Do-not-reset-position-on-first-frame.patch \
+    file://0007-BCMCZ-379-Refactor-position-query-handling.patch \
 "
 
 SRCREV = "5534aa56dfea8d3758db59753c539f0be1dba03d"
