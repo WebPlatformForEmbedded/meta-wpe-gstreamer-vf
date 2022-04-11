@@ -1,0 +1,1432 @@
+From 13369f01388196ed19c14d620d559e96056ae54b Mon Sep 17 00:00:00 2001
+From: David Koo <david.koo@broadcom.com>
+Date: Thu, 17 Feb 2022 16:41:54 -0500
+Subject: [PATCH 4/6] BCMCZ-378 : audfilter svp optimization - remove a memcpy
+ and a dma for encrypted stream using batom - fix vp9 youtube cert failure
+
+refs #SWRDKV-2556
+
+Change-Id: Icb06e27c5d87c7d8a2943213e9f7e5fe7127a35d
+---
+ reference/audfilter/src/gst_brcm_aud_filter.c   | 108 ++-
+ reference/audfilter/src/gst_brcm_aud_filter.h   |  37 +-
+ reference/audfilter/src/gst_brcm_p_aac_repack.c | 955 ++++++------------------
+ reference/util/src/gst_svp_util.c               |  16 +-
+ 4 files changed, 357 insertions(+), 759 deletions(-)
+
+diff --git a/reference/audfilter/src/gst_brcm_aud_filter.c b/reference/audfilter/src/gst_brcm_aud_filter.c
+index 580a055..f8f761f 100755
+--- a/reference/audfilter/src/gst_brcm_aud_filter.c
++++ b/reference/audfilter/src/gst_brcm_aud_filter.c
+@@ -464,6 +464,11 @@ static NEXUS_Error nexus_alloc(GstBrcmAudFilter *filter)
+         return rc;
+     }
+ 
++    gst_brcm_p_frame_buf_init(&filter->frame_allocator, filter->frame_buf, sizeof(filter->frame_buf));
++    filter->factory = batom_factory_create(bkni_alloc, 64);
++    filter->src = batom_accum_create(filter->factory);
++    filter->dst = batom_accum_create(filter->factory);
++
+     if (!gst_brcm_aud_filter_open_playpump(filter)) {
+         GST_ERROR("Open Playpump Failed");
+         goto alloc_fail;
+@@ -480,6 +485,10 @@ alloc_fail:
+ 
+ static void nexus_free(GstBrcmAudFilter *filter)
+ {
++    batom_accum_destroy(filter->src);
++    batom_accum_destroy(filter->dst);
++    batom_factory_destroy(filter->factory);
++
+     svp_util_close();
+ 
+     if (filter->enable_svp) {
+@@ -1303,6 +1312,7 @@ static GstFlowReturn gst_brcm_aud_filter_chain (GstPad *pad, GstObject *parent,
+     guint8 *buf_ptr=0;
+     guint32 buf_size=0;
+     int64_t pts=0;
++    batom_t atom = NULL;
+ 
+     void *  playpump_buffer;
+     size_t  playpump_buffer_size;
+@@ -1311,10 +1321,10 @@ static GstFlowReturn gst_brcm_aud_filter_chain (GstPad *pad, GstObject *parent,
+ 
+     NEXUS_PlaypumpStatus        playpumpStatus;
+     int waitUs = 0;
+-    uint8_t * secure_buffer = NULL;
+ #ifdef BGST_SVP_SECBUF
+     void * desc;
+     GstBrcmSvpMeta* meta = NULL;
++    uint8_t * secure_buffer = NULL;
+ #endif
+     GstFlowReturn rv = GST_FLOW_OK;
+ 
+@@ -1412,11 +1422,10 @@ static GstFlowReturn gst_brcm_aud_filter_chain (GstPad *pad, GstObject *parent,
+             NEXUS_Playpump_WriteComplete(filter->playpump, playpump_buffer_size, 0);
+             continue;
+         }
+-        secure_buffer = NULL;
+-        uint8_t *secure_buffer_free = NULL;
+ 
+         if (filter->enable_svp) {
+ #ifdef BGST_SVP_SECBUF
++            secure_buffer = NULL;
+             meta = gst_buffer_get_brcm_svp_meta(buf);
+             if (meta) {
+                 brcm_svp_meta_data_t * meta_data;
+@@ -1466,7 +1475,9 @@ static GstFlowReturn gst_brcm_aud_filter_chain (GstPad *pad, GstObject *parent,
+                 }
+             } else {
+                 GST_LOG("no meta data");
+-                secure_buffer = NULL;
++                batom_accum_clear(filter->src);
++                batom_accum_add_range(filter->src, buf_ptr, buf_size);
++                atom = batom_from_accum(filter->src, NULL, NULL);
+             }
+ #else
+ #ifdef BGST_SVP_META
+@@ -1481,17 +1492,16 @@ static GstFlowReturn gst_brcm_aud_filter_chain (GstPad *pad, GstObject *parent,
+                     uint8_t * decrypted_buf = (uint8_t *) meta_data->u.u3.secbuf_ptr;
+                     svp_chunk_info * chunk_info = (svp_chunk_info *)meta_data->u.u3.chunk_info;
+                     uint32_t  chunk_count =  meta_data->u.u3.chunks_cnt;
+-                    
+-                    secure_buffer_free = svp_util_get_whole_decrypted_buffer(buf_ptr, buf_size, decrypted_buf, (uint32_t*)chunk_info, chunk_count);
+-                    secure_buffer = secure_buffer_free;
+-                    
+-                } else {
+-                    GST_TRACE("no meta data");
+-                    secure_buffer = NULL;
+-                }
++
++                    atom = svp_util_decrypted_atom(filter->src, buf_ptr, buf_size, decrypted_buf, (uint32_t *)chunk_info, chunk_count);
++                    } else {
++                        GST_WARNING("metadata sub_type type x%x not supported", meta_data->sub_type);
++                    }
+             } else {
+                 GST_TRACE("no meta data");
+-                secure_buffer = NULL;
++                batom_accum_clear(filter->src);
++                batom_accum_add_range(filter->src, buf_ptr, buf_size);
++                atom = batom_from_accum(filter->src, NULL, NULL);
+             }
+ #else
+             GstSvpMeta* meta = NULL;
+@@ -1525,12 +1535,13 @@ static GstFlowReturn gst_brcm_aud_filter_chain (GstPad *pad, GstObject *parent,
+                             }
+                             if(has_clear)
+                             {
+-                                secure_buffer_free = svp_util_get_whole_decrypted_buffer(buf_ptr, buf_size, decrypted, (uint32_t*)map.data, subsamplescount);
+-                                secure_buffer = secure_buffer_free;
++                                atom = svp_util_decrypted_atom(filter->src, buf_ptr, buf_size, decrypted, (uint32_t*)map.data, subsamplescount);
+                             }
+                             else
+                             {
+-                                secure_buffer = decrypted;
++                                batom_accum_clear(filter->src);
++                                batom_accum_add_range(filter->src, decrypted, buf_size);
++                                atom = batom_from_accum(filter->src, NULL, NULL);
+                             }
+                             gst_buffer_unmap(subsamplesinfo, &map);
+                             //GST_DEBUG("decrypt secure_mem:%p, subsamples info:%p, count:%d", decrypted, subsamplesinfo, subsamplescount);
+@@ -1543,42 +1554,61 @@ static GstFlowReturn gst_brcm_aud_filter_chain (GstPad *pad, GstObject *parent,
+                 } else {
+                     GST_WARNING("metadata does not have %s", GST_SVP_SYSTEM_ID_CAPS_FIELD);
+                 }
++            } else {
++                batom_accum_clear(filter->src);
++                batom_accum_add_range(filter->src, buf_ptr, buf_size);
++                atom = batom_from_accum(filter->src, NULL, NULL);
+             }
+ #endif
+ #endif
++        } else { // no svp
++            batom_accum_clear(filter->src);
++            batom_accum_add_range(filter->src, buf_ptr, buf_size);
++            atom = batom_from_accum(filter->src, NULL, NULL);
+         }
+ 
+-        if (filter->audio_codec == baudio_format_aac)
+-            data_size = gst_brcm_p_aac_pes_adts_header(filter, playpump_buffer, (uint8_t *)filter->codec_data, filter->codec_data_size, buf_ptr, buf_size, pts, secure_buffer);
+-        else if ((filter->audio_codec == baudio_format_wma_std) || (filter->audio_codec == baudio_format_wma_pro))
+-            data_size = gst_brcm_p_wma_pes_header(filter, playpump_buffer, buf_ptr, buf_size, pts, secure_buffer);
+-        else if (filter->audio_codec == baudio_format_vorbis)
+-            data_size = gst_brcm_p_vorbis_pes_bcma_header(filter, playpump_buffer, buf_ptr, buf_size, pts, secure_buffer);
++        if (filter->audio_codec == baudio_format_aac) {
++            atom = gst_brcm_p_process_payload_aac(filter, atom, (uint8_t *)filter->codec_data, filter->codec_data_size, buf_size);
++            atom = gst_brcm_p_make_pes_packet(filter, atom, pts);
++        } else if ((filter->audio_codec == baudio_format_wma_std) || (filter->audio_codec == baudio_format_wma_pro)) {
++            atom = gst_brcm_p_process_payload_wma(filter, atom, buf_size);
++            atom = gst_brcm_p_make_pes_packet(filter, atom, pts);
++        } 
++        else if (filter->audio_codec == baudio_format_vorbis) {
++            atom = gst_brcm_p_process_payload_vorbis(filter, atom, buf_size);
++            atom = gst_brcm_p_make_pes_packet(filter, atom, pts);
++        }
+ #if OPUS_SUPPORTED
+-        else if (filter->audio_codec == baudio_format_opus)
+-            data_size = gst_brcm_p_opus_pes_bcma_header(filter, playpump_buffer, buf_ptr, buf_size, pts, secure_buffer);
++        else if (filter->audio_codec == baudio_format_opus) {
++            atom = gst_brcm_p_process_payload_opus(filter, atom, buf_size);
++            atom = gst_brcm_p_make_pes_packet(filter, atom, pts);
++        }
+ #endif
+ #if (AC4_SUPPORTED)
+-        else if (filter->audio_codec == baudio_format_ac4)
+-            data_size = gst_brcm_p_ac4_pes_header(filter, playpump_buffer, buf_ptr, buf_size, pts, secure_buffer);
++        else if (filter->audio_codec == baudio_format_ac4) {
++            atom = gst_brcm_p_process_payload_ac4(filter, atom, buf_size);
++            atom = gst_brcm_p_make_pes_packet(filter, atom, pts);
++        }
+ #endif
+-        else
+-            data_size = gst_brcm_p_pes_header(filter, playpump_buffer, buf_ptr, buf_size, pts, secure_buffer);
++        else {
++            atom = gst_brcm_p_make_pes_packet(filter, atom, pts);
++        }
++
++        if (filter->enable_svp) {
++            data_size = svp_util_copy_atom(playpump_buffer, atom);
++        } else { // no svp
++            data_size = gst_brcm_p_copy_atom(playpump_buffer, atom);
++        }
+ 
+         NEXUS_Playpump_WriteComplete(filter->playpump, 0, data_size);
++        gst_brcm_p_frame_buf_clear(&filter->frame_allocator);
+ 
+-        if (filter->enable_svp) {
+-#ifndef BGST_SVP_SECBUF
+-            if (secure_buffer_free) {
+-                svp_util_free_decrypted_buffer(secure_buffer_free);
+-            }
+-#else
+-            if (secure_buffer) {
+-                B_Secbuf_Free(secure_buffer);
+-                secure_buffer = NULL;
+-            }
+-#endif
++#ifdef BGST_SVP_SECBUF
++        if (filter->enable_svp && secure_buffer) {
++            B_Secbuf_Free(secure_buffer);
++            secure_buffer = NULL;
+         }
++#endif
+ 
+         break;
+     }
+diff --git a/reference/audfilter/src/gst_brcm_aud_filter.h b/reference/audfilter/src/gst_brcm_aud_filter.h
+index b5b80d3..b21e0a9 100755
+--- a/reference/audfilter/src/gst_brcm_aud_filter.h
++++ b/reference/audfilter/src/gst_brcm_aud_filter.h
+@@ -122,6 +122,13 @@ typedef struct bgst_opus_identification_header {
+ 
+ } bgst_opus_identification_header_t;
+ 
++struct gst_brcm_p_frame_buf_allocator {
++    void *buf;
++    unsigned length; /* length of the buffer */
++    unsigned off; /* offset into the frame buffer */
++    unsigned persistent_off; /* bytes at the end of the frame buff which are allocated for the life of the allocator */
++};
++
+ struct _GstBrcmAudFilter
+ {
+     GstBaseParse element;
+@@ -171,6 +178,13 @@ struct _GstBrcmAudFilter
+     void * secbuf_peshdr;
+     gboolean enable_svp;
+ 
++    uint8_t pes_buf[1024];
++
++    struct gst_brcm_p_frame_buf_allocator frame_allocator;
++    uint8_t frame_buf[32768];
++    batom_accum_t src, dst;
++    batom_factory_t factory;
++
+     GstPad * downstream_peer_pad;
+     brcm_buflog_handle bufLog;
+ };
+@@ -181,17 +195,28 @@ struct _GstBrcmAudFilterClass
+ };
+ 
+ uint32_t gst_brcm_p_aac_header(void *  codec_data, void * header, size_t header_len);
+-uint32_t gst_brcm_p_aac_pes_adts_header(GstBrcmAudFilter *filter, void *  playpump_buffer, uint8_t *codec_data, uint32_t codec_data_size,  uint8_t *buf_ptr, uint32_t buf_size, int64_t pts, uint8_t *decryptedBuffer);
+-uint32_t gst_brcm_p_pes_header(GstBrcmAudFilter *filter, void *  playpump_buffer, uint8_t *buf_ptr, uint32_t buf_size, int64_t pts, uint8_t *decryptedBuffer);
+ uint32_t gst_brcm_p_ac4_pes_header(GstBrcmAudFilter *filter, void *  playpump_buffer, uint8_t *buf_ptr, uint32_t buf_size, int64_t pts, uint8_t *secure_buffer);
+ uint32_t gst_brcm_p_wma_pes_header(GstBrcmAudFilter *filter , void *  playpump_buffer, uint8_t *buf_ptr, uint32_t buf_size, int64_t pts, uint8_t *decryptedBuffer);
+-
+ gboolean gst_brcm_p_vorbis_accumulate_packet(GstBrcmAudFilter *filter, GstBuffer *buffer);
+-uint32_t gst_brcm_p_vorbis_pes_bcma_header (GstBrcmAudFilter *filter, void *  playpump_buffer, uint8_t *buf_ptr, uint32_t buf_size, int64_t pts, uint8_t *decryptedBuffer);
+-
+-uint32_t gst_brcm_p_opus_pes_bcma_header(GstBrcmAudFilter *filter , void *  playpump_buffer, uint8_t *buf_ptr, uint32_t buf_size, int64_t pts,uint8_t *decryptedBuffer);
+ 
+ uint32_t bhex_decode(const char *src, size_t src_len, uint8_t *dest, size_t dst_len);
++
++batom_t gst_brcm_p_process_payload_aac(GstBrcmAudFilter *filter, batom_t atom_es, uint8_t *codec_data, uint32_t codec_data_size, uint32_t buf_size);
++batom_t gst_brcm_p_process_payload_vorbis (GstBrcmAudFilter *filter, batom_t atom_es, uint32_t buf_size);
++batom_t gst_brcm_p_process_payload_opus (GstBrcmAudFilter *filter, batom_t atom_es, uint32_t buf_size);
++batom_t gst_brcm_p_process_payload_ac4 (GstBrcmAudFilter *filter, batom_t atom_es, uint32_t buf_size);
++batom_t gst_brcm_p_process_payload_wma (GstBrcmAudFilter *filter, batom_t atom_es, uint32_t buf_size);
++
++batom_t gst_brcm_p_make_pes_packet(GstBrcmAudFilter *filter, batom_t atom, int64_t pts);
++uint32_t gst_brcm_p_copy_atom(void *playpump_buffer, batom_t atom_pes);
++uint32_t secbuf_export_atom(void *pDest, batom_t atom);
++
++void gst_brcm_p_frame_buf_init(struct gst_brcm_p_frame_buf_allocator *allocator, void *buf, unsigned length);
++void *gst_brcm_p_frame_buf_alloc(struct gst_brcm_p_frame_buf_allocator *allocator, unsigned size);
++void *gst_brcm_p_frame_buf_alloc_persistent(struct gst_brcm_p_frame_buf_allocator *allocator, unsigned size);
++unsigned gst_brcm_p_frame_buf_available(struct gst_brcm_p_frame_buf_allocator *allocator);
++void gst_brcm_p_frame_buf_clear(struct gst_brcm_p_frame_buf_allocator *allocator);
++
+ G_END_DECLS
+ 
+ #endif /* __GST_BRCM_AUD_FILTER_H__ */
+diff --git a/reference/audfilter/src/gst_brcm_p_aac_repack.c b/reference/audfilter/src/gst_brcm_p_aac_repack.c
+index 42c392c..cd5c625 100755
+--- a/reference/audfilter/src/gst_brcm_p_aac_repack.c
++++ b/reference/audfilter/src/gst_brcm_p_aac_repack.c
+@@ -55,13 +55,10 @@ GST_DEBUG_CATEGORY_EXTERN (brcmaudfilter);
+ #define GST_CAT_DEFAULT brcmaudfilter
+ 
+ #define WAV_HDR_SIZE 20
+-#define HDR_DATA_SIZE 4
+-#define MAX_AUDIO_PES_DATA_SIZE 10000
+-uint8_t g_audio_pes_data[MAX_AUDIO_PES_DATA_SIZE];
++#define MAX_AUDIO_HEADER_SIZE 1000
+ 
+-#ifdef BGST_SVP_SECBUF
+-static void * secbuf_peshdr_realloc(GstBrcmAudFilter *filter, uint32_t hdr_size);
+-#endif
++static const uint8_t b_media_frame_bcma[] = { 'B', 'C', 'M', 'A' };
++const batom_vec bmedia_frame_bcma = BATOM_VEC_INITIALIZER((void *)b_media_frame_bcma, sizeof(b_media_frame_bcma));
+ 
+ static int
+ b_get_hex_one(char c)
+@@ -96,11 +93,8 @@ bhex_decode(const char *src, size_t src_len, uint8_t *dest, size_t dst_len)
+     return dst_off;
+ }
+ 
+-static GstBuffer * gst_brcm_p_aac_adts_header (uint8_t *codec_data, uint32_t codec_data_size, uint32_t buf_size)
++static size_t gst_brcm_p_aac_header_fill (uint8_t *adts_header, uint8_t *codec_data, uint32_t codec_data_size, uint32_t buf_size)
+ {
+-
+-    guint8 * adts_header = g_malloc0 (7);
+-    GstBuffer * out_buf = gst_buffer_new_allocate(NULL,7,NULL);
+     guint8 rate_idx = 0, channels = 0, obj_type = 0;
+ 
+     // Regarding to ISO 14496-3 - Syntax of AudioSpecificConfig()
+@@ -152,13 +146,24 @@ static GstBuffer * gst_brcm_p_aac_adts_header (uint8_t *codec_data, uint32_t cod
+     adts_header[5] |= 0x1F;
+     adts_header[6] = 0xFC;
+ 
+-    memcpy (BRCM_GST_BUFFER_DATA (out_buf, 1), adts_header, 7);
+-
+-    g_free (adts_header);
+-    return out_buf;
++    return BMEDIA_ADTS_HEADER_SIZE;
+ }
+ 
+ 
++batom_t gst_brcm_p_process_payload_aac(GstBrcmAudFilter *filter, batom_t atom_es, uint8_t *codec_data, uint32_t codec_data_size, uint32_t buf_size)
++{
++    batom_t atom;
++    void *hdr  = gst_brcm_p_frame_buf_alloc(&filter->frame_allocator, BMEDIA_ADTS_HEADER_SIZE);
++
++    batom_accum_add_range(filter->dst, hdr, gst_brcm_p_aac_header_fill(hdr, codec_data, codec_data_size, buf_size));
++    batom_accum_add_atom(filter->dst,atom_es);
++
++    atom = batom_from_accum(filter->dst, NULL, NULL);
++    batom_release(atom_es);
++
++    return atom;
++}
++
+ uint32_t gst_brcm_p_aac_header(void *  codec_data, void * header, size_t header_len)
+ {
+ 
+@@ -187,534 +192,211 @@ uint32_t gst_brcm_p_aac_header(void *  codec_data, void * header, size_t header_
+ 
+ }
+ 
+-
+-uint32_t _gst_brcm_p_aac_pes_adts_header_(GstBrcmAudFilter *filter, void *  playpump_buffer, uint8_t *codec_data, uint32_t codec_data_size,  uint8_t *buf_ptr, uint32_t buf_size, int64_t pts, uint8_t *secure_buffer,  uint32_t secure_offset)
+-{
+-
+-    uint32_t data_size;
+-    bmedia_pes_info pes_info;
+-    uint32_t pes_header_len;
+-    uint8_t   pes_header[64];
+-
+-    uint32_t adts_header_len = 0;
+-    GstBuffer *pAdtsHeader = NULL;
+-    guint8 *adts_header_ptr = NULL;
+-
+-    bmedia_pes_info_init(&pes_info, REPACK_AUDIO_PES_ID);
+-
+-    if (pts == -1)
+-        pes_info.pts_valid = false;
+-    else
+-        pes_info.pts_valid = true;
+-    pes_info.pts = pts;
+-
+-#if PRINT_HEADER
+-    printf("\n Config Data %d: ",codec_data_size);
+-    for(int k=0;k<codec_data_size;k++)
+-        printf("%x ", GST_READ_UINT8 ((codec_data)+k));
+-    printf("\n");
+-#endif
+-
+-    if(codec_data)
+-    {
+-        pAdtsHeader = gst_brcm_p_aac_adts_header (codec_data, codec_data_size, buf_size);
+-        adts_header_len = 7;
+-        adts_header_ptr = BRCM_GST_BUFFER_DATA(pAdtsHeader, 0);
+-    }
+-    pes_header_len = bmedia_pes_header_init(pes_header, buf_size+adts_header_len, &pes_info);
+-
+-#if PRINT_HEADER
+-    printf("\n ADTS Header %d: ",adts_header_len);
+-    for(int k=0;k<adts_header_len;k++)
+-        printf("%x ", adts_header_ptr[k]);
+-    printf("\n");
+-#endif
+-
+-    if (filter->enable_svp) {
+-#ifdef BGST_SVP_SECBUF
+-        {
+-            void * bufferSvp = NULL;
+-            uint8_t *  decryptedBuffer = (uint8_t * ) secure_buffer;
+-            uint32_t offset = 0;
+-            bufferSvp = secbuf_peshdr_realloc(filter, (pes_header_len + adts_header_len));
+-            /* Copy PES Header*/
+-            B_Secbuf_ImportData(bufferSvp, offset, pes_header, pes_header_len, true);
+-            B_Secbuf_ExportData(bufferSvp, offset, (uint8_t *) playpump_buffer + offset, pes_header_len, true);
+-            offset += pes_header_len;
+-            /* Copy ADTS Header*/
+-            if ( adts_header_ptr) {
+-                B_Secbuf_ImportData(bufferSvp, offset , adts_header_ptr, adts_header_len, true);
+-                B_Secbuf_ExportData(bufferSvp, offset, (uint8_t *) playpump_buffer + offset, adts_header_len, true);
+-            }
+-            offset += adts_header_len;
+-            /* Copy ES Buffer */
+-            if (decryptedBuffer) {
+-                B_Secbuf_ExportData(decryptedBuffer, secure_offset, (uint8_t *) playpump_buffer + offset, buf_size, true);
+-            } else {
+-                B_Secbuf_Alloc(buf_size,
+-                               B_Secbuf_Type_eGeneric,
+-                               &bufferSvp);
+-                B_Secbuf_ImportData(bufferSvp, 0, buf_ptr, buf_size, true);
+-                B_Secbuf_ExportData(bufferSvp, 0, (uint8_t *) playpump_buffer + offset, buf_size, true);
+-                B_Secbuf_Free(bufferSvp);
+-            }
+-        }
+-#else
+-        uint8_t *nexus_heap;
+-        uint32_t heap_size;
+-
+-        heap_size = (buf_size>pes_header_len)?buf_size:pes_header_len;
+-        nexus_heap = svp_util_nexus_heap_alloc(heap_size);
+-        if (!nexus_heap) return 0;
+-
+-        /* Copy PES Header*/
+-        memcpy(nexus_heap, pes_header, pes_header_len);
+-        svp_util_private_copy(playpump_buffer, nexus_heap, pes_header_len, TRUE);
+-
+-        /* Copy ADTS Header*/
+-        if(adts_header_ptr) {
+-            memcpy(nexus_heap, adts_header_ptr, adts_header_len);
+-            svp_util_private_copy(playpump_buffer+pes_header_len, nexus_heap, adts_header_len, TRUE);
+-        }
+-
+-        /* Copy ES Data*/
+-        if (secure_buffer)
+-            svp_util_private_copy(playpump_buffer+pes_header_len+adts_header_len, secure_buffer+secure_offset, buf_size, FALSE);
+-        else {
+-            memcpy(nexus_heap, buf_ptr, buf_size);
+-            svp_util_private_copy(playpump_buffer+pes_header_len+adts_header_len, nexus_heap, buf_size, TRUE);
+-        }
+-
+-        svp_util_nexus_heap_free(nexus_heap);
+-#endif
+-    } else {
+-        BSTD_UNUSED(filter);
+-        BSTD_UNUSED(secure_buffer);
+-
+-        /* Copy PES Header*/
+-        memcpy(playpump_buffer, pes_header, pes_header_len);
+-
+-        /* Copy ADTS Header*/
+-        if(adts_header_ptr)
+-            memcpy((uint8_t *)playpump_buffer+pes_header_len, adts_header_ptr, adts_header_len);
+-
+-        /* Copy ES Data*/
+-        memcpy((uint8_t *)playpump_buffer+pes_header_len+adts_header_len, buf_ptr, buf_size);
+-    }
+-
+-    data_size = pes_header_len+adts_header_len+buf_size;
+-
+-    if (pAdtsHeader) {
+-        gst_buffer_unref(pAdtsHeader);
+-        pAdtsHeader = NULL;
+-    }
+-
+-    return data_size;
+-}
+-
+-uint32_t gst_brcm_p_aac_pes_adts_header(GstBrcmAudFilter *filter, void *  playpump_buffer, uint8_t *codec_data, uint32_t codec_data_size,  uint8_t *buf_ptr, uint32_t buf_size, int64_t pts, uint8_t *secure_buffer)
++static size_t gst_brcm_p_vorbis_header_fill (uint8_t *header, GstBrcmAudFilter *filter)
+ {
+-    uint32_t pb_consumed = 0;   /* playpump_buffer consumed */
+-    uint32_t secure_offset = 0;
+-
+-    while (buf_size) {
+-        guint sz = buf_size > B_MEDIA_MAX_PES_SIZE ? B_MEDIA_MAX_PES_SIZE : buf_size;
+-        GST_DEBUG("buf_size %u  playpump_buffer %p  codec_data_size %u  buf_ptr %p  sz %u  pts 0x%x secure_buffer %p  secure_offset %u pb_consumed %u", buf_size, playpump_buffer, codec_data_size, buf_ptr, sz, (guint)pts, secure_buffer, secure_offset, pb_consumed);
+-        uint32_t consumed = _gst_brcm_p_aac_pes_adts_header_(filter, playpump_buffer, codec_data, codec_data_size, buf_ptr, sz, pts, secure_buffer, secure_offset);
+-        pb_consumed += consumed;
+-        playpump_buffer += consumed;  /* move playpump_buffer by number consumed this pass */
+-        secure_offset += sz;
+-        buf_ptr += sz;
+-        buf_size -= sz;
+-        pts = -1; /* pts was only valid for first sub-buffer, mark rest as invalid */
+-    }
+-    return pb_consumed;
+-}
+-
+-
+-gboolean gst_brcm_p_vorbis_accumulate_packet(GstBrcmAudFilter *filter, GstBuffer *buffer) {
+-    guint8 *buf_ptr = BRCM_GST_BUFFER_DATA(buffer, 0);
+-
+-    if (buf_ptr[0] == 1) {
+-        if (filter->id_hdr)
+-            gst_buffer_unref(filter->id_hdr);
+-
+-        filter->id_hdr = buffer;
+-        return TRUE;
+-    }
+-    else if (buf_ptr[0] == 3) {
+-        if (filter->comment_hdr)
+-            gst_buffer_unref(filter->comment_hdr);
+-
+-        filter->comment_hdr = buffer;
+-        return TRUE;
+-    }
+-    else if (buf_ptr[0] == 5) {
+-        if (filter->setup_hdr)
+-            gst_buffer_unref(filter->setup_hdr);
+-
+-        filter->setup_hdr = buffer;
+-        return TRUE;
+-    }
+-
+-    return FALSE;
+-}
+-
+-uint32_t gst_brcm_p_vorbis_pes_bcma_header(GstBrcmAudFilter *filter, void *playpump_buffer, uint8_t *buf_ptr, uint32_t buf_size, int64_t pts, uint8_t *secure_buffer)
+-    {
+-    uint32_t data_size;
+     uint8_t *id_buf = NULL;
+     uint32_t id_buf_size = 0;
+     uint8_t *comment_buf = NULL;
+     uint32_t comment_buf_size = 0;
+     uint8_t *setup_buf = NULL;
+     uint32_t setup_buf_size = 0;
+-    bmedia_pes_info pes_info;
+-    uint32_t pes_header_len;
+-    uint8_t   pes_header[64];
+-    uint8_t bcma_header[8] = {'B', 'C', 'M', 'A'};
+-    uint32_t bcma_header_size = 4;
+-    uint8_t wav_hdr[WAV_HDR_SIZE];
+     uint8_t *buf;
+-    uint8_t hdr[HDR_DATA_SIZE];
+-    uint32_t pes_data_size;
++    uint32_t meta_len;
+ 
+     if ((filter->id_hdr == NULL) || (filter->setup_hdr == NULL)) {
+-     GST_ERROR("Got Vorbis data without id header and/or setup header. Discard");
+-     return 0;
++        GST_ERROR("Got Vorbis data without id header and/or setup header. Discard");
++        return 0;
+     }
+ 
+     id_buf_size = BRCM_GST_BUFFER_SIZE(filter->id_hdr,0);
+     if (filter->comment_hdr)
+         comment_buf_size = BRCM_GST_BUFFER_SIZE(filter->comment_hdr,0);
+     setup_buf_size = BRCM_GST_BUFFER_SIZE(filter->setup_hdr,0);
+-    bmedia_pes_info_init(&pes_info, REPACK_AUDIO_PES_ID);
+-    if (pts == -1)
+-        pes_info.pts_valid = false;
+-    else
+-        pes_info.pts_valid = true;
+-    pes_info.pts = pts;
+-
+-    pes_header_len = bmedia_pes_header_init(pes_header, buf_size+setup_buf_size+comment_buf_size+id_buf_size+WAV_HDR_SIZE+bcma_header_size+HDR_DATA_SIZE+4, &pes_info);
+-
+-    /* Copy PES Header*/
+-    memcpy(g_audio_pes_data, pes_header, pes_header_len);
+-
+-    /* Copy BCMA Header*/
+-    memcpy((uint8_t *)g_audio_pes_data+pes_header_len, bcma_header, bcma_header_size);
+ 
+-    //     hdr = (uint8_t *)playpump_buffer+pes_header_len+bcma_header_size;
+-    B_MEDIA_SAVE_UINT32_BE(hdr, buf_size);
+     /* Create a WAV header */
+-    //     wav_hdr = (uint8_t *)playpump_buffer+pes_header_len+bcma_header_size+HDR_DATA_SIZE;
+-
+     /* Format tag */
+-    B_MEDIA_SAVE_UINT16_LE(wav_hdr, 0xFFFF);
+-
++    B_MEDIA_SAVE_UINT16_LE(header, 0xFFFF);
+     /* Num channels */
+-    B_MEDIA_SAVE_UINT16_LE(wav_hdr+2, filter->channels); /* TODO: Get this from CAPS */
+-
++    B_MEDIA_SAVE_UINT16_LE(header+2, filter->channels); /* TODO: Get this from CAPS */
+     /* Sample rate */
+-    B_MEDIA_SAVE_UINT32_LE(wav_hdr+4, filter->rate); /* TODO: Get this from CAPS */
+-
++    B_MEDIA_SAVE_UINT32_LE(header+4, filter->rate); /* TODO: Get this from CAPS */
+     /* Byte rate */
+-    B_MEDIA_SAVE_UINT32_LE(wav_hdr+8, 32000);
+-
++    B_MEDIA_SAVE_UINT32_LE(header+8, 32000);
+     /* Block align */
+-    B_MEDIA_SAVE_UINT16_LE(wav_hdr+12, 1);
+-
++    B_MEDIA_SAVE_UINT16_LE(header+12, 1);
+     /* Bits per sample */
+-    B_MEDIA_SAVE_UINT16_LE(wav_hdr+14, 8);
+-
++    B_MEDIA_SAVE_UINT16_LE(header+14, 8);
+     /* Buffer size */
+-    B_MEDIA_SAVE_UINT16_LE(wav_hdr+16, 5+1+setup_buf_size+comment_buf_size+id_buf_size);
++    B_MEDIA_SAVE_UINT16_LE(header+16, 5+1+setup_buf_size+comment_buf_size+id_buf_size);
+     //printf("%d = %d + %d + %d + %d\n",5+1+setup_buf_size+comment_buf_size+id_buf_size,buf_size,setup_buf_size,comment_buf_size,id_buf_size);
+-
+-    B_MEDIA_SAVE_UINT16_LE(wav_hdr+18, 0x1e00);
+-
+-    memcpy(g_audio_pes_data+pes_header_len+bcma_header_size, hdr, HDR_DATA_SIZE);
+-    memcpy(g_audio_pes_data+pes_header_len+bcma_header_size+HDR_DATA_SIZE, wav_hdr, WAV_HDR_SIZE);
++    B_MEDIA_SAVE_UINT16_LE(header+18, 0x1e00);
+ 
+     /* Copy the headers */
+     id_buf = BRCM_GST_BUFFER_DATA(filter->id_hdr,0);
+-    memcpy((uint8_t *)g_audio_pes_data+pes_header_len+bcma_header_size+HDR_DATA_SIZE+WAV_HDR_SIZE, id_buf, id_buf_size);
++    memcpy((uint8_t *)header+WAV_HDR_SIZE, id_buf, id_buf_size);
+ 
+-    buf = (uint8_t *)g_audio_pes_data+pes_header_len+bcma_header_size+HDR_DATA_SIZE+WAV_HDR_SIZE+id_buf_size;
++    buf = (uint8_t *)header+WAV_HDR_SIZE+id_buf_size;
+     B_MEDIA_SAVE_UINT16_BE(buf, comment_buf_size);
+ 
+     id_buf_size += 2;
+ 
+     if (comment_buf_size) {
+         comment_buf = BRCM_GST_BUFFER_DATA(filter->comment_hdr,0);
+-        memcpy((uint8_t *)g_audio_pes_data+pes_header_len+bcma_header_size+HDR_DATA_SIZE+WAV_HDR_SIZE+id_buf_size, comment_buf, comment_buf_size);
++        memcpy((uint8_t *)header+WAV_HDR_SIZE+id_buf_size, comment_buf, comment_buf_size);
+ 
+-        buf = (uint8_t *)g_audio_pes_data+pes_header_len+bcma_header_size+HDR_DATA_SIZE+WAV_HDR_SIZE+id_buf_size+comment_buf_size;
++        buf = (uint8_t *)header+WAV_HDR_SIZE+id_buf_size+comment_buf_size;
+         B_MEDIA_SAVE_UINT16_BE(buf, setup_buf_size);
+ 
+         comment_buf_size += 2;
+     }
+ 
+     setup_buf = BRCM_GST_BUFFER_DATA(filter->setup_hdr, 0);
+-    memcpy((uint8_t *)g_audio_pes_data+pes_header_len+bcma_header_size+HDR_DATA_SIZE+WAV_HDR_SIZE+id_buf_size+comment_buf_size, setup_buf, setup_buf_size);
+-
+-
+-    pes_data_size = pes_header_len+bcma_header_size+HDR_DATA_SIZE+WAV_HDR_SIZE+id_buf_size+comment_buf_size+setup_buf_size;
+-
+-    if (filter->enable_svp) {
+-#ifdef BGST_SVP_SECBUF
+-        {
+-            void * bufferSvp = NULL;
+-            uint8_t * decryptedBuffer = (uint8_t *) secure_buffer;
+-            uint32_t offset = 0;
+-
+-            bufferSvp = secbuf_peshdr_realloc(filter, pes_data_size);
+-            B_Secbuf_ImportData(bufferSvp, offset, g_audio_pes_data, pes_data_size,  true);
+-            B_Secbuf_ExportData(bufferSvp, offset, (uint8_t *) playpump_buffer, pes_data_size, true);
+-            offset += pes_data_size;
+-
+-            /* Copy ES Buffer */
+-            if (decryptedBuffer) {
+-                B_Secbuf_ExportData(decryptedBuffer, 0, (uint8_t *) playpump_buffer + offset, buf_size, true);
+-            } else {
+-                B_Secbuf_Alloc(buf_size,
+-                               B_Secbuf_Type_eGeneric,
+-                               &bufferSvp);
+-                B_Secbuf_ImportData(bufferSvp, 0, buf_ptr, buf_size, true);
+-                B_Secbuf_ExportData(bufferSvp, 0, (uint8_t *) playpump_buffer + offset, buf_size, true);
+-                B_Secbuf_Free(bufferSvp);
+-            }
+-        }
+-#else
+-            uint8_t *nexus_heap;
+-            uint32_t heap_size;
+-
+-            heap_size = (buf_size>pes_data_size)?buf_size:pes_data_size;
+-            nexus_heap = svp_util_nexus_heap_alloc(heap_size);
+-            if (!nexus_heap) return 0;
+-
+-            /* Copy PES Data*/
+-            memcpy(nexus_heap, g_audio_pes_data, pes_data_size);
+-            svp_util_private_copy(playpump_buffer, nexus_heap, pes_data_size, TRUE);
+-
+-            /* Copy ES Data*/
+-            if (secure_buffer)
+-                svp_util_private_copy(playpump_buffer+pes_data_size, secure_buffer, buf_size, FALSE);
+-            else {
+-                memcpy(nexus_heap, buf_ptr, buf_size);
+-                svp_util_private_copy(playpump_buffer+pes_data_size, nexus_heap, buf_size, TRUE);
+-            }
+-            svp_util_nexus_heap_free(nexus_heap);
+-#endif
+-    } else {
+-            BSTD_UNUSED(secure_buffer);
++    memcpy((uint8_t *)header+WAV_HDR_SIZE+id_buf_size+comment_buf_size, setup_buf, setup_buf_size);
+ 
+-            /* Copy PES Data*/
+-            memcpy(playpump_buffer, g_audio_pes_data, pes_data_size);
+-
+-            /* Copy ES Data*/
+-            memcpy((uint8_t *)playpump_buffer+pes_header_len+bcma_header_size+HDR_DATA_SIZE+WAV_HDR_SIZE+id_buf_size+comment_buf_size+setup_buf_size, buf_ptr, buf_size);
+-    }
++    meta_len = WAV_HDR_SIZE+id_buf_size+comment_buf_size+setup_buf_size;
+ 
+-    data_size = pes_header_len+bcma_header_size+HDR_DATA_SIZE+WAV_HDR_SIZE+setup_buf_size+comment_buf_size+id_buf_size+buf_size;
+-
+-    return data_size;
++    return meta_len;
+ }
+ 
+-
+-uint32_t gst_brcm_p_ac4_pes_header(GstBrcmAudFilter *filter, void *  playpump_buffer, uint8_t *buf_ptr, uint32_t buf_size, int64_t pts, uint8_t *secure_buffer)
++batom_t gst_brcm_p_process_payload_vorbis (GstBrcmAudFilter *filter, batom_t atom_es, uint32_t buf_size)
+ {
+-    uint32_t data_size;
+-    bmedia_pes_info pes_info;
+-    uint32_t pes_header_len;
+-    uint8_t   pes_header[64];
+-    uint32_t meta_len = (buf_size <= 63 * 1024) ? 4 : 8; // AC-4 Sync Frame size
+-    uint8_t *meta;
+-    uint32_t pes_data_size;
+-
+-    bmedia_pes_info_init(&pes_info, REPACK_AUDIO_PES_ID);
+-    if (pts == -1)
+-        pes_info.pts_valid = false;
+-    else
+-        pes_info.pts_valid = true;
+-    pes_info.pts = pts;
+-    pes_header_len = bmedia_pes_header_init(pes_header, buf_size + meta_len, &pes_info);
+-    /* Copy PES Header*/
+-    memcpy(g_audio_pes_data, pes_header, pes_header_len);
+-    meta = (uint8_t *)g_audio_pes_data+pes_header_len;
++    batom_t atom;
++    uint8_t *payload  = gst_brcm_p_frame_buf_alloc(&filter->frame_allocator, sizeof(uint32_t));
++    void *header  = gst_brcm_p_frame_buf_alloc(&filter->frame_allocator, MAX_AUDIO_HEADER_SIZE);
+ 
+-    /* ETSI TS 103 190-2 V1.1.1  Annex C (normative): AC-4 Sync Frame  */
+-    B_MEDIA_SAVE_UINT16_BE(meta, 0xAC40);
+-    if(buf_size <= 63 * 1024) {
+-        B_MEDIA_SAVE_UINT16_BE(meta+2, buf_size);
+-    } else {
+-        B_MEDIA_SAVE_UINT16_BE(meta+2, 0xFFFF);
+-        B_MEDIA_SAVE_UINT32_BE(meta+4, buf_size);
+-    }
++    B_MEDIA_SAVE_UINT32_BE(payload, buf_size);
++    batom_accum_add_vec(filter->dst, &bmedia_frame_bcma);
++    batom_accum_add_range(filter->dst, payload, sizeof(uint32_t));
++    batom_accum_add_range(filter->dst, header, gst_brcm_p_vorbis_header_fill(header, filter));
++    batom_accum_add_atom(filter->dst,atom_es);
+ 
+-    pes_data_size = pes_header_len+meta_len;
+-
+-    if (filter->enable_svp) {
+-#ifdef BGST_SVP_SECBUF
+-        {
+-            void * bufferSvp = NULL;
+-            uint8_t * decryptedBuffer = (uint8_t *) secure_buffer;
+-            uint32_t offset = 0;
+-
+-            bufferSvp = secbuf_peshdr_realloc(filter, (pes_data_size));
+-            B_Secbuf_ImportData(bufferSvp, offset, g_audio_pes_data, pes_data_size, true);
+-            B_Secbuf_ExportData(bufferSvp, offset, playpump_buffer, pes_data_size, true);
+-            offset += pes_data_size;
+-
+-            /* Copy ES Buffer */
+-            if (decryptedBuffer) {
+-                B_Secbuf_ExportData(decryptedBuffer, 0, playpump_buffer + offset, buf_size, true);
+-            } else {
+-                B_Secbuf_Alloc(buf_size,
+-                               B_Secbuf_Type_eGeneric,
+-                               &bufferSvp);
+-                B_Secbuf_ImportData(bufferSvp, 0, buf_ptr, buf_size, true);
+-                B_Secbuf_ExportData(bufferSvp, 0, (uint8_t *) playpump_buffer + offset, buf_size, true);
+-                B_Secbuf_Free(bufferSvp);
+-            }
+-        }
++    atom = batom_from_accum(filter->dst, NULL, NULL);
++    batom_release(atom_es);
+ 
+-#else
+-        uint8_t *nexus_heap;
+-        uint32_t heap_size;
++    return atom;
++}
+ 
+-        heap_size = (buf_size>pes_data_size)?buf_size:pes_data_size;
+-        nexus_heap = svp_util_nexus_heap_alloc(heap_size);
+-        if (!nexus_heap) return 0;
++gboolean gst_brcm_p_vorbis_accumulate_packet(GstBrcmAudFilter *filter, GstBuffer *buffer)
++{
++    guint8 *buf_ptr = BRCM_GST_BUFFER_DATA(buffer, 0);
+ 
+-        /* Copy PES Data*/
+-        memcpy(nexus_heap, g_audio_pes_data, pes_data_size);
+-        svp_util_private_copy(playpump_buffer, nexus_heap, pes_data_size, TRUE);
++    if (buf_ptr[0] == 1) {
++        if (filter->id_hdr)
++            gst_buffer_unref(filter->id_hdr);
+ 
+-        /* Copy ES Data*/
+-        if (secure_buffer)
+-            svp_util_private_copy(playpump_buffer+pes_data_size, secure_buffer, buf_size, FALSE);
+-        else {
+-            memcpy(nexus_heap, buf_ptr, buf_size);
+-            svp_util_private_copy(playpump_buffer+pes_data_size, nexus_heap, buf_size, TRUE);
+-        }
+-        svp_util_nexus_heap_free(nexus_heap);
+-#endif
+-    } else {
+-        BSTD_UNUSED(secure_buffer);
++        filter->id_hdr = buffer;
++        return TRUE;
++    }
++    else if (buf_ptr[0] == 3) {
++        if (filter->comment_hdr)
++            gst_buffer_unref(filter->comment_hdr);
+ 
+-        /* Copy PES Data*/
+-        memcpy(playpump_buffer, g_audio_pes_data, pes_data_size);
++        filter->comment_hdr = buffer;
++        return TRUE;
++    }
++    else if (buf_ptr[0] == 5) {
++        if (filter->setup_hdr)
++            gst_buffer_unref(filter->setup_hdr);
+ 
+-        /* Copy ES Data*/
+-        memcpy((uint8_t *)playpump_buffer+pes_data_size, buf_ptr, buf_size);
++        filter->setup_hdr = buffer;
++        return TRUE;
+     }
+ 
+-    data_size = pes_header_len+meta_len+buf_size;
+-    return data_size;
++    return FALSE;
+ }
+ 
+ 
+-uint32_t gst_brcm_p_pes_header(GstBrcmAudFilter *filter, void *  playpump_buffer, uint8_t *buf_ptr, uint32_t buf_size, int64_t pts, uint8_t *secure_buffer)
++static size_t gst_brcm_p_opus_header_fill (void *header, GstBrcmAudFilter *filter)
+ {
+-    uint32_t data_size;
+-    bmedia_pes_info pes_info;
+-    uint32_t pes_header_len;
+-    uint8_t   pes_header[64];
+-
+-    // FILE *fp = fopen("/usr/local/audfilter_mkv.cap", "a");
+-
+-    bmedia_pes_info_init(&pes_info, REPACK_AUDIO_PES_ID);
+-
+-    if (pts == -1)
+-        pes_info.pts_valid = false;
+-    else
+-        pes_info.pts_valid = true;
+-    pes_info.pts = pts;
+-
+-    pes_header_len = bmedia_pes_header_init(pes_header, buf_size, &pes_info);
+-
+-    if (filter->enable_svp) {
+-#ifdef BGST_SVP_SECBUF
+-        {
+-            void * bufferSvp = NULL;
+-            uint8_t * decryptedBuffer = (uint8_t *) secure_buffer;
+-            uint32_t offset = 0;
+-
+-            bufferSvp = secbuf_peshdr_realloc(filter, (pes_header_len));
+-            B_Secbuf_ImportData(bufferSvp, offset, pes_header, pes_header_len, true);
+-            B_Secbuf_ExportData(bufferSvp, offset, playpump_buffer, pes_header_len, true);
+-            offset += pes_header_len;
+-
+-            /* Copy ES Buffer */
+-            if (decryptedBuffer) {
+-                B_Secbuf_ExportData(decryptedBuffer, 0, playpump_buffer + offset, buf_size, true);
+-            } else {
+-                B_Secbuf_Alloc(buf_size,
+-                               B_Secbuf_Type_eGeneric,
+-                               &bufferSvp);
+-                B_Secbuf_ImportData(bufferSvp, 0, buf_ptr, buf_size, true);
+-                B_Secbuf_ExportData(bufferSvp, 0, (uint8_t *) playpump_buffer + offset, buf_size, true);
+-                B_Secbuf_Free(bufferSvp);
+-            }
+-        }
++    uint32_t meta_len = 0;
++    uint32_t cb_size = filter->opusHeader.u.buf.bufferSize;
+ 
+-#else
+-        uint8_t *nexus_heap;
+-        uint32_t heap_size;
++    meta_len = sizeof (uint16_t) /* FormatTag */
++                + sizeof (uint16_t) /* Channels */
++                + sizeof (uint32_t) /* SamplesPerSec */
++                + sizeof (uint32_t) /* AvgBytesPerSec */
++                + sizeof (uint16_t) /* BlockAlign */
++                + sizeof (uint16_t) /* BitsPerSample */
++                + sizeof (uint16_t) /* cbSize */;
+ 
+-        heap_size = (buf_size>pes_header_len)?buf_size:pes_header_len;
+-        nexus_heap = svp_util_nexus_heap_alloc(heap_size);
+-        if (!nexus_heap) return 0;
++    meta_len += filter->opusHeader.u.buf.bufferSize;
+ 
+-        /* Copy PES Data*/
+-        memcpy(nexus_heap, pes_header, pes_header_len);
+-        svp_util_private_copy(playpump_buffer, nexus_heap, pes_header_len, TRUE);
++    memset(header, 0, meta_len);
++    *((uint16_t*) header) = GUINT16_TO_LE(filter->wave_format);
++    header += 2;
++    *((uint16_t*) header) = GUINT16_TO_LE(filter->num_channels);
++    header += 2;
++    *((uint32_t*) header) = GUINT32_TO_LE(filter->sample_rate);
++    header += 4;
++    *((uint32_t*) header) = GUINT32_TO_LE(filter->bytes_per_sec);
++    header += 4;
++    *((uint16_t*) header) = GUINT16_TO_LE(filter->block_align);
++    header += 2;
++    *((uint16_t*) header) = GUINT16_TO_LE(filter->bits_per_sample);
++    header += 2;
++    *((uint16_t*) header) = GUINT16_TO_LE(cb_size);
++    header += 2;
++
++    memcpy(header, filter->opusHeader.u.buf.buffer, filter->opusHeader.u.buf.bufferSize);
++
++    return meta_len;
++}
+ 
+-        /* Copy ES Data*/
+-        if (secure_buffer)
+-            svp_util_private_copy(playpump_buffer+pes_header_len, secure_buffer, buf_size, FALSE);
+-        else {
+-            memcpy(nexus_heap, buf_ptr, buf_size);
+-            svp_util_private_copy(playpump_buffer+pes_header_len, nexus_heap, buf_size, TRUE);
+-        }
+-        svp_util_nexus_heap_free(nexus_heap);
+-#endif
+-    } else {
+-        BSTD_UNUSED(filter);
+-        BSTD_UNUSED(secure_buffer);
++batom_t gst_brcm_p_process_payload_opus (GstBrcmAudFilter *filter, batom_t atom_es, uint32_t buf_size)
++{
++    batom_t atom;
++    uint8_t *payload  = gst_brcm_p_frame_buf_alloc(&filter->frame_allocator, sizeof(uint32_t));
++    void *header  = gst_brcm_p_frame_buf_alloc(&filter->frame_allocator, MAX_AUDIO_HEADER_SIZE);
+ 
+-        /* Copy PES Header*/
+-        memcpy(playpump_buffer, pes_header, pes_header_len);
+-        // if (fp) fwrite(pes_header, 1, pes_header_len, fp);
++    B_MEDIA_SAVE_UINT32_BE(payload, buf_size);
++    batom_accum_add_vec(filter->dst, &bmedia_frame_bcma);
++    batom_accum_add_range(filter->dst, payload, sizeof(uint32_t));
++    batom_accum_add_range(filter->dst, header, gst_brcm_p_opus_header_fill(header, filter));
++    batom_accum_add_atom(filter->dst,atom_es);
+ 
+-        /* Copy ES Data*/
+-        memcpy((uint8_t *)playpump_buffer+pes_header_len, buf_ptr, buf_size);
+-        // if (fp) fwrite(buf_ptr, 1, buf_size, fp);
+-    }
++    atom = batom_from_accum(filter->dst, NULL, NULL);
++    batom_release(atom_es);
+ 
+-    data_size = pes_header_len+buf_size;
++    return atom;
++}
+ 
+-    //fclose(fp);
+-    return data_size;
++static size_t gst_brcm_p_ac4_header_fill (void *header, GstBrcmAudFilter *filter, uint32_t buf_size)
++{
++    uint32_t meta_len = (buf_size <= 63 * 1024) ? 4 : 8; // AC-4 Sync Frame size
++    uint8_t *buf = header;
++
++    /* ETSI TS 103 190-2 V1.1.1  Annex C (normative): AC-4 Sync Frame  */
++    B_MEDIA_SAVE_UINT16_BE(buf, 0xAC40);
++    if(buf_size <= 63 * 1024) {
++        B_MEDIA_SAVE_UINT16_BE(buf+2, buf_size);
++    } else {
++        B_MEDIA_SAVE_UINT16_BE(buf+2, 0xFFFF);
++        B_MEDIA_SAVE_UINT32_BE(buf+4, buf_size);
++    }
++
++    return meta_len;
+ }
+ 
+-static guint8 media_frame_bcma[] = { 'B', 'C', 'M', 'A' };
++batom_t gst_brcm_p_process_payload_ac4 (GstBrcmAudFilter *filter, batom_t atom_es, uint32_t buf_size)
++{
++    batom_t atom;
++    void *header  = gst_brcm_p_frame_buf_alloc(&filter->frame_allocator, 8);
+ 
+-uint32_t gst_brcm_p_wma_pes_header(GstBrcmAudFilter *filter , void *  playpump_buffer, uint8_t *buf_ptr, uint32_t buf_size, int64_t pts, uint8_t *secure_buffer) {
++    batom_accum_add_range(filter->dst, header, gst_brcm_p_ac4_header_fill(header, filter, buf_size));
++    batom_accum_add_atom(filter->dst,atom_es);
+ 
+-    uint32_t data_size;
+-    bmedia_pes_info pes_info;
+-    uint32_t pes_header_len;
+-    uint8_t   pes_header[64];
+-    // FILE *fp = fopen("/usr/local/audfilter_mkv.cap", "a");
++    atom = batom_from_accum(filter->dst, NULL, NULL);
++    batom_release(atom_es);
++
++    return atom;
++}
++
++static size_t gst_brcm_p_wma_header_fill (void *header, GstBrcmAudFilter *filter)
++{
+     uint32_t meta_len = 0;
+     uint32_t cb_size = 0;
+-    uint8_t *meta;
+-    uint32_t pes_data_size;
+ 
+-    meta_len = sizeof(media_frame_bcma)
+-                   + 4 /* packet length */
+-                   + sizeof (uint16_t) /* FormatTag */
++    meta_len = sizeof (uint16_t) /* FormatTag */
+                    + sizeof (uint16_t) /* Channels */
+                    + sizeof (uint32_t) /* SamplesPerSec */
+                    + sizeof (uint32_t) /* AvgBytesPerSec */
+@@ -724,278 +406,129 @@ uint32_t gst_brcm_p_wma_pes_header(GstBrcmAudFilter *filter , void *  playpump_b
+ 
+     cb_size =  (filter->wave_format == WAVE_FORMAT_WMAUDIO2) ? 10 : 18;
+     meta_len += cb_size;
+-    bmedia_pes_info_init(&pes_info, REPACK_AUDIO_PES_ID);
+-    if (pts == -1)
+-        pes_info.pts_valid = false;
+-    else
+-        pes_info.pts_valid = true;
+-    pes_info.pts = pts;
+-    pes_header_len = bmedia_pes_header_init(pes_header, buf_size + meta_len, &pes_info); // bcma + wav fmt struct + WMA fields
+-    /* Copy PES Header*/
+-    memcpy(g_audio_pes_data, pes_header, pes_header_len);
+- //    if (fp) fwrite(pes_header, 1, pes_header_len, fp);
+-
+-    meta = (uint8_t *)g_audio_pes_data+pes_header_len;
+-    memset(meta, 0, meta_len);
+-
+-    memcpy(meta, media_frame_bcma, sizeof(media_frame_bcma));
+-    meta += sizeof(media_frame_bcma);
+ 
+-    *((guint32*)meta) = GUINT32_TO_BE(buf_size);
+-    meta += 4;
++    memset(header, 0, meta_len);
++
++    *((guint16*)header) = GUINT16_TO_LE(filter->wave_format);
++    header += 2;
++    *((guint16*)header) = GUINT16_TO_LE(filter->num_channels);
++    header += 2;
++    *((guint32*)header) = GUINT32_TO_LE(filter->sample_rate);
++    header += 4;
++    *((guint32*)header) = GUINT32_TO_LE(filter->bytes_per_sec);
++    header += 4;
++    *((guint16*)header) = GUINT16_TO_LE(filter->block_align);
++    header += 2;
++    *((guint16*)header) = GUINT16_TO_LE(filter->bits_per_sample);
++    header += 2;
++    *((guint16*)header) = GUINT16_TO_LE(cb_size);
++    header += 2;
+ 
+-    *((guint16*)meta) = GUINT16_TO_LE(filter->wave_format);
+-    meta += 2;
+-
+-    *((guint16*)meta) = GUINT16_TO_LE(filter->num_channels);
+-    meta += 2;
+-
+-    *((guint32*)meta) = GUINT32_TO_LE(filter->sample_rate);
+-    meta += 4;
++    if (filter->codec_data)
++        memcpy(header, filter->codec_data, filter->codec_data_size);
+ 
+-    *((guint32*)meta) = GUINT32_TO_LE(filter->bytes_per_sec);
+-    meta += 4;
++   return meta_len;
+ 
+-    *((guint16*)meta) = GUINT16_TO_LE(filter->block_align);
+-    meta += 2;
++}
+ 
+-    *((guint16*)meta) = GUINT16_TO_LE(filter->bits_per_sample);
+-    meta += 2;
+ 
+-    *((guint16*)meta) = GUINT16_TO_LE(cb_size);
+-    meta += 2;
++batom_t gst_brcm_p_process_payload_wma (GstBrcmAudFilter *filter, batom_t atom_es, uint32_t buf_size)
++{
++    batom_t atom;
++    uint8_t *payload  = gst_brcm_p_frame_buf_alloc(&filter->frame_allocator, sizeof(uint32_t));
++    void *header  = gst_brcm_p_frame_buf_alloc(&filter->frame_allocator, 8);
+ 
+-    if (filter->codec_data)
+-        memcpy(meta, filter->codec_data, filter->codec_data_size);
+-    meta += cb_size;
+-
+-    pes_data_size = pes_header_len+meta_len;
+-
+-    if (filter->enable_svp) {
+-#ifdef BGST_SVP_SECBUF
+-        {
+-            void * bufferSvp = NULL;
+-            uint8_t * decryptedBuffer = (uint8_t *) secure_buffer;
+-            uint32_t offset = 0;
+-
+-            bufferSvp = secbuf_peshdr_realloc(filter, (pes_data_size));
+-            B_Secbuf_ImportData(bufferSvp, offset, g_audio_pes_data, pes_data_size, true);
+-            B_Secbuf_ExportData(bufferSvp, offset, playpump_buffer, pes_data_size, true);
+-            offset += pes_data_size;
+-
+-            /* Copy ES Buffer */
+-            if (decryptedBuffer) {
+-                B_Secbuf_ExportData(decryptedBuffer, 0, playpump_buffer + offset, buf_size, true);
+-            } else {
+-                B_Secbuf_Alloc(buf_size,
+-                               B_Secbuf_Type_eGeneric,
+-                               &bufferSvp);
+-                B_Secbuf_ImportData(bufferSvp, 0, buf_ptr, buf_size, true);
+-                B_Secbuf_ExportData(bufferSvp, 0, (uint8_t *) playpump_buffer + offset, buf_size, true);
+-                B_Secbuf_Free(bufferSvp);
+-            }
+-        }
++    B_MEDIA_SAVE_UINT32_BE(payload, buf_size);
++    batom_accum_add_vec(filter->dst, &bmedia_frame_bcma);
++    batom_accum_add_range(filter->dst, payload, sizeof(uint32_t));
++    batom_accum_add_range(filter->dst, header, gst_brcm_p_wma_header_fill(header, filter));
++    batom_accum_add_atom(filter->dst,atom_es);
+ 
+-#else
+-        uint8_t *nexus_heap;
+-        uint32_t heap_size;
++    atom = batom_from_accum(filter->dst, NULL, NULL);
++    batom_release(atom_es);
+ 
+-        heap_size = (buf_size>pes_data_size)?buf_size:pes_data_size;
+-        nexus_heap = svp_util_nexus_heap_alloc(heap_size);
+-        if (!nexus_heap) return 0;
++    return atom;
++}
+ 
+-        /* Copy PES Data*/
+-        memcpy(nexus_heap, g_audio_pes_data, pes_data_size);
+-        svp_util_private_copy(playpump_buffer, nexus_heap, pes_data_size, TRUE);
++batom_t gst_brcm_p_make_pes_packet(GstBrcmAudFilter *filter, batom_t atom, int64_t pts)
++{
++    batom_t pes_atom=NULL;
+ 
+-        /* Copy ES Data*/
+-        if (secure_buffer)
+-            svp_util_private_copy(playpump_buffer+pes_data_size, secure_buffer, buf_size, FALSE);
+-        else {
+-            memcpy(nexus_heap, buf_ptr, buf_size);
+-            svp_util_private_copy(playpump_buffer+pes_data_size, nexus_heap, buf_size, TRUE);
+-        }
+-        svp_util_nexus_heap_free(nexus_heap);
+-#endif
++    bmedia_pes_info pes_info;
++    BMEDIA_PES_INFO_INIT(&pes_info, REPACK_AUDIO_PES_ID);
++    BMEDIA_PES_SET_PTS(&pes_info, pts);
++
++    size_t hdr_len;
++    size_t payload_len = batom_len(atom);
++    if( payload_len > B_MEDIA_MAX_PES_SIZE) {
++        batom_accum_clear(filter->src);
++        batom_accum_add_atom(filter->src, atom);
++        batom_accum_clear(filter->dst);
++        pes_atom = bmedia_pes_subdivide_packet(filter->src, &pes_info, filter->dst, filter->pes_buf, sizeof(filter->pes_buf), B_MEDIA_MAX_PES_SIZE);
+     } else {
+-        BSTD_UNUSED(secure_buffer);
+-
+-        /* Copy PES Data*/
+-        memcpy(playpump_buffer, g_audio_pes_data, pes_data_size);
+-
+-        /* Copy ES Data*/
+-        memcpy((uint8_t *)playpump_buffer+pes_data_size, buf_ptr, buf_size);
+-    //    if (fp) fwrite(buf_ptr, 1, buf_size, fp);
++        hdr_len = bmedia_pes_header_init(filter->pes_buf, payload_len, &pes_info);
++        pes_atom = batom_from_range_and_atom(filter->pes_buf, hdr_len, atom, NULL, NULL);
+     }
++    batom_release(atom);
+ 
+-    data_size = pes_header_len+meta_len+buf_size;
+-
+-    //fclose(fp);
+-   return data_size;
+-
++    return pes_atom;
+ }
+ 
+-uint32_t gst_brcm_p_opus_pes_bcma_header(GstBrcmAudFilter *filter , void *  playpump_buffer, uint8_t *buf_ptr, uint32_t buf_size, int64_t pts, uint8_t *secure_buffer) {
+-
++uint32_t gst_brcm_p_copy_atom(void *playpump_buffer, batom_t atom_pes)
++{
+     uint32_t data_size;
+-    bmedia_pes_info pes_info;
+-    uint32_t pes_header_len;
+-    uint8_t   pes_header[64];
+-    // FILE *fp = fopen("/opus.cap", "a");
+-    uint32_t meta_len = 0;
+-    uint32_t cb_size = filter->opusHeader.u.buf.bufferSize;
+-    uint8_t *meta;
+-    uint32_t pes_data_size;
+-
+-    bmedia_pes_info_init(&pes_info, REPACK_AUDIO_PES_ID);
+-    if (pts == -1)
+-        pes_info.pts_valid = false;
+-    else
+-        pes_info.pts_valid = true;
+-    pes_info.pts = pts;
+-
+-    meta_len = sizeof(media_frame_bcma)
+-                   + 4 /* packet length */
+-                   + sizeof (uint16_t) /* FormatTag */
+-                   + sizeof (uint16_t) /* Channels */
+-                   + sizeof (uint32_t) /* SamplesPerSec */
+-                   + sizeof (uint32_t) /* AvgBytesPerSec */
+-                   + sizeof (uint16_t) /* BlockAlign */
+-                   + sizeof (uint16_t) /* BitsPerSample */
+-                   + sizeof (uint16_t) /* cbSize */;
+-
+-    meta_len += filter->opusHeader.u.buf.bufferSize;
+-
+-    pes_header_len = bmedia_pes_header_init(pes_header, buf_size+meta_len, &pes_info);
+-
+-    /* Copy PES Header*/
+-    memcpy(g_audio_pes_data, pes_header, pes_header_len);
+-    // if (fp) fwrite(pes_header, 1, pes_header_len, fp);
+-
+-    meta = (uint8_t *)g_audio_pes_data+pes_header_len;
+-    memset(meta, 0, meta_len);
+-
+-    memcpy(meta, media_frame_bcma, sizeof(media_frame_bcma));
+-    meta += sizeof(media_frame_bcma);
+-
+-    *((uint32_t*) meta) = GUINT32_TO_BE(buf_size);
+-    meta += 4;
+-
+-    *((uint16_t*) meta) = GUINT16_TO_LE(filter->wave_format);
+-    meta += 2;
+-
+-    *((uint16_t*) meta) = GUINT16_TO_LE(filter->num_channels);
+-    meta += 2;
++    batom_cursor cursor;
+ 
+-    *((uint32_t*) meta) = GUINT32_TO_LE(filter->sample_rate);
+-    meta += 4;
++    data_size = batom_len(atom_pes);
++    batom_cursor_from_atom(&cursor, atom_pes);
++    batom_cursor_copy(&cursor,playpump_buffer,data_size);
++    batom_release(atom_pes);
+ 
+-    *((uint32_t*) meta) = GUINT32_TO_LE(filter->bytes_per_sec);
+-    meta += 4;
+-
+-    *((uint16_t*) meta) = GUINT16_TO_LE(filter->block_align);
+-    meta += 2;
+-
+-    *((uint16_t*) meta) = GUINT16_TO_LE(filter->bits_per_sample);
+-    meta += 2;
+-
+-    *((uint16_t*) meta) = GUINT16_TO_LE(cb_size);
+-    meta += 2;
+-
+-    // if (fp) fwrite((uint8_t *)playpump_buffer+pes_header_len, 1, meta_len, fp);
+-
+-    memcpy(meta, filter->opusHeader.u.buf.buffer, filter->opusHeader.u.buf.bufferSize);
+-    meta += filter->opusHeader.u.buf.bufferSize;
+-
+-    pes_data_size = pes_header_len+meta_len;
++    return data_size;
++}
+ 
+-    if (filter->enable_svp) {
+-#ifdef BGST_SVP_SECBUF
+-        {
+-            void * bufferSvp = NULL;
+-            uint8_t * decryptedBuffer = (uint8_t *) secure_buffer;
+-            uint32_t offset = 0;
++void gst_brcm_p_frame_buf_init(struct gst_brcm_p_frame_buf_allocator *allocator, void *buf, unsigned length)
++{
++    allocator->buf = buf;
++    allocator->length = length;
++    allocator->off = 0;
++    allocator->persistent_off = 0;
++    return;
++}
+ 
+-            bufferSvp = secbuf_peshdr_realloc(filter, (pes_data_size));
+-            B_Secbuf_ImportData(bufferSvp, offset, g_audio_pes_data, pes_data_size, true);
+-            B_Secbuf_ExportData(bufferSvp, offset, playpump_buffer, pes_data_size, true);
+-            offset += pes_data_size;
++void *gst_brcm_p_frame_buf_alloc(struct gst_brcm_p_frame_buf_allocator *allocator, unsigned size)
++{
++    if(allocator->off + size < allocator->length) {
++        void *result = (uint8_t *)allocator->buf + allocator->off;
++        allocator->off += size;
++        return result;
++    }
++    GST_ERROR("gst_brcm_p_frame_buf_alloc%p out of memory %u,%u,%u,%u", (void *)allocator, size, allocator->off, allocator->persistent_off, allocator->length);
++    return NULL;
++}
+ 
+-            /* Copy ES Buffer */
+-            if (decryptedBuffer) {
+-                B_Secbuf_ExportData(decryptedBuffer, 0, playpump_buffer + offset, buf_size, true);
+-            } else {
+-                B_Secbuf_Alloc(buf_size,
+-                               B_Secbuf_Type_eGeneric,
+-                               &bufferSvp);
+-                B_Secbuf_ImportData(bufferSvp, 0, buf_ptr, buf_size, true);
+-                B_Secbuf_ExportData(bufferSvp, 0, (uint8_t *) playpump_buffer + offset, buf_size, true);
+-                B_Secbuf_Free(bufferSvp);
+-            }
+-        }
+-#else
+-        uint8_t *nexus_heap;
+-        uint32_t heap_size;
+-
+-        heap_size = (buf_size>pes_data_size)?buf_size:pes_data_size;
+-        nexus_heap = svp_util_nexus_heap_alloc(heap_size);
+-        if (!nexus_heap) return 0;
+-
+-        /* Copy PES Data*/
+-        memcpy(nexus_heap, g_audio_pes_data, pes_data_size);
+-        svp_util_private_copy( playpump_buffer, nexus_heap, pes_data_size, TRUE);
+-
+-        /* Copy ES Data*/
+-        if (secure_buffer)
+-            svp_util_private_copy(playpump_buffer+pes_data_size, secure_buffer, buf_size, FALSE);
+-        else {
+-            memcpy(nexus_heap, buf_ptr, buf_size);
+-            svp_util_private_copy(playpump_buffer+pes_data_size, nexus_heap, buf_size, TRUE);
+-        }
+-        svp_util_nexus_heap_free(nexus_heap);
+-#endif
++void *gst_brcm_p_frame_buf_alloc_persistent(struct gst_brcm_p_frame_buf_allocator *allocator, unsigned size)
++{
++    if(allocator->persistent_off == allocator->off) {
++        void *result = gst_brcm_p_frame_buf_alloc(allocator, size);
++        allocator->persistent_off = allocator->off;
++        return result;
+     } else {
+-        BSTD_UNUSED(secure_buffer);
+-        /* Copy PES Data*/
+-        memcpy(playpump_buffer, g_audio_pes_data, pes_data_size);
+-
+-        /* Copy ES Data*/
+-        memcpy((uint8_t *)playpump_buffer+pes_data_size, buf_ptr, buf_size);
+-        //    if (fp) fwrite(buf_ptr, 1, buf_size, fp);
++        GST_ERROR("Not supported");
++        return NULL;
+     }
++}
+ 
+-    data_size = pes_header_len+buf_size+meta_len;
+-
+-    // fclose(fp);
+-    return data_size;
++unsigned gst_brcm_p_frame_buf_available(struct gst_brcm_p_frame_buf_allocator *allocator)
++{
++    return allocator->length - allocator->off;
+ }
+ 
+-#ifdef BGST_SVP_SECBUF
+-static void * secbuf_peshdr_realloc(GstBrcmAudFilter *filter, uint32_t hdr_size)
++void gst_brcm_p_frame_buf_clear(struct gst_brcm_p_frame_buf_allocator *allocator)
+ {
+-    int rc = -1;
+-    void * buf = NULL;
+-    void * desc = NULL;
+-
+-    if (!hdr_size) goto out;
+-    if (filter->secbuf_peshdr) {
+-        B_Secbuf_Info info;
+-        desc = (uint8_t * )filter->secbuf_peshdr;
+-        rc = B_Secbuf_GetBufferInfo(desc, &info);
+-        if(rc) { GST_ERROR("B_Secbuf_GetBufferInfo failed %d", rc); };
+-        if ((info.size) < hdr_size) {
+-            /* reallocate */
+-            rc = B_Secbuf_Free(desc);
+-            filter->secbuf_peshdr = NULL;
+-            desc = NULL;
+-        }
+-        else {
+-            goto out;
+-        }
+-    }
+-    B_Secbuf_Alloc(hdr_size, B_Secbuf_Type_eGeneric, &filter->secbuf_peshdr);
+-out:
+-    buf = filter->secbuf_peshdr;
+-    return buf;
++    GST_TRACE("gst_brcm_p_frame_buf_clear%p used %u[%u]", (void *)allocator, allocator->off, allocator->length - allocator->persistent_off);
++    allocator->off = allocator->persistent_off;
++    return;
+ }
+-#endif
++
++
+diff --git a/reference/util/src/gst_svp_util.c b/reference/util/src/gst_svp_util.c
+index 057329b..5d8f29b 100755
+--- a/reference/util/src/gst_svp_util.c
++++ b/reference/util/src/gst_svp_util.c
+@@ -546,27 +546,37 @@ batom_t svp_util_decrypted_atom(batom_accum_t acc, uint8_t *buf_ptr, int buf_siz
+     uint32_t offset =0 ;
+     uint32_t enc_offset = 0;
+     uint32_t last=0;
++    uint32_t total = 0;
+     batom_accum_clear(acc);
+ 
+     for (int i = 0; i < subsamplescount; i++) {
+         clear = *subsamplesinfo++;
+         enc = *subsamplesinfo++;
+         offset = *subsamplesinfo++; /* start of subsample in the buf_ptr */
+-        if (offset != last) {
+-             g_print("svp_util_decrypted_atom: offset %d!= last %d\n", offset, last);
+-//             batom_accum_add_range(acc, buf_ptr+last, offset);    // add clear data from gstbuf
++        if (offset > last) {
++             g_print("svp_util_decrypted_atom: offset %d > last %d\n", offset, last);
++             batom_accum_add_range(acc, buf_ptr + last, offset - last);    // add clear data from gstbuf
++             total += offset - last;
+         }
+ //        g_print("subsamples[%d]: %d/%d/%d/%d\n", i, clear, enc, offset, enc_offset);
+         if (clear) {
+             batom_accum_add_range(acc, buf_ptr + offset, clear);    // add clear data from gstbuf
++            total += clear;
+         }
+         if (enc){
+             batom_accum_add_range(acc, decrypted + enc_offset, enc);          // add decrypted data in secured memory from decrypted buffer
+             enc_offset+=enc;
++            total += enc;
+         }
+         last = offset+clear+enc;
+     }
+ 
++    if (last!=buf_size) {
++        batom_accum_add_range(acc, buf_ptr + last, buf_size - last);    // add clear data from gstbuf
++        total += buf_size - last;
++//        g_print("remaining bytes: last/buf_size %d/%d total %d\n", last, buf_size, total);
++    }
++
+     atom = batom_from_accum(acc, NULL, NULL);
+ 
+     return atom;
+-- 
+2.7.4
+

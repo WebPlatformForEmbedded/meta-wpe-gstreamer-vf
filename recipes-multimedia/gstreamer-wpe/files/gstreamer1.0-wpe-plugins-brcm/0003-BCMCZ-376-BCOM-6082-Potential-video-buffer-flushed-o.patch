@@ -1,0 +1,84 @@
+From 6c8228665d9dcc6796ad5902aebcaa1c01122e95 Mon Sep 17 00:00:00 2001
+From: Carson Zirkle <carson.zirkle@broadcom.com>
+Date: Tue, 15 Feb 2022 10:43:39 -0500
+Subject: [PATCH 3/6] BCMCZ-376 BCOM-6082 : Potential video buffer flushed on
+ startup race condition
+
+Cherry-picked from : https://jira.rdkcentral.com/jira/browse/BCMCZ-343
+	https://code.rdkcentral.com/r/c/collaboration/rdk/components/generic/gst-plugins-soc/soc/broadcom/+/57169
+
+Reason for change:
+	Vidfilter can receive segment and buffer before video decoder receives segment
+	if the segment start == 0 then potential to flush buffer/frame
+	restrict flushing on segment to case where setstartpts has been set (since previous flush) ie, 2nd segment since flush..
+
+Test Procedure:
+	General regression, IP/QAM Live, channel change,  VOD/DVR seek/skip/REW
+
+Risks: Low
+
+Signed-off-by: Carson Zirkle <carson.zirkle@broadcom.net>
+Change-Id: Ida29e02ab8995a5442fcbd76c4e2c8bccdeebcc5
+---
+ reference/videodecode/src/gst_brcm_video_decoder.c | 11 +++++++----
+ reference/videodecode/src/gst_brcm_video_decoder.h |  1 +
+ 2 files changed, 8 insertions(+), 4 deletions(-)
+
+diff --git a/reference/videodecode/src/gst_brcm_video_decoder.c b/reference/videodecode/src/gst_brcm_video_decoder.c
+index 753503f..8dff95c 100755
+--- a/reference/videodecode/src/gst_brcm_video_decoder.c
++++ b/reference/videodecode/src/gst_brcm_video_decoder.c
+@@ -771,6 +771,7 @@ static void gst_brcm_video_decoder_init(GstBrcmVideoDecoder *decoder) {
+ 
+     decoder->first_pts = 0;
+     decoder->current_pts = 0;
++    decoder->start_pts = 0;
+     decoder->current_pts_valid = FALSE;
+     decoder->disco_adjust_pts = 0;
+     decoder->position = 0;
+@@ -2984,6 +2985,7 @@ static gboolean gst_brcm_video_decoder_sink_event(GstPad *pad, GstObject *parent
+         stop_eos_timer(decoder, "GST_EVENT_FLUSH_START");
+         NEXUS_SimpleVideoDecoder_Flush(decoder->video_decoder);
+         decoder->num_pics_decoded = 0;
++        decoder->start_pts = 0;
+         if (decoder->verify_decode_timer) {
+             verify_decode_timer_stop(decoder);
+             verify_decode_timer_start(decoder);
+@@ -3028,7 +3030,10 @@ static gboolean gst_brcm_video_decoder_sink_event(GstPad *pad, GstObject *parent
+             GST_INFO("New segment - start: %"GST_TIME_FORMAT", position: %"GST_TIME_FORMAT", stop: %"GST_TIME_FORMAT", nexus decoder startPts: %u)"
+                 , GST_TIME_ARGS(segStart), GST_TIME_ARGS(segPos), GST_TIME_ARGS(segStop), start_pts);
+ 
+-            if (segStart == 0) {
++            if (segStart != 0) {
++                NEXUS_SimpleVideoDecoder_SetStartPts(decoder->video_decoder, start_pts);
++            }
++            else if (decoder->start_pts) {
+                 NEXUS_VideoDecoderStatus decoderStatus;
+                 NEXUS_SimpleVideoDecoder_GetStatus (decoder->video_decoder, &decoderStatus);
+                 if (decoderStatus.fifoDepth || decoderStatus.queueDepth) {
+@@ -3036,9 +3041,7 @@ static gboolean gst_brcm_video_decoder_sink_event(GstPad *pad, GstObject *parent
+                 }
+                 NEXUS_SimpleVideoDecoder_Flush(decoder->video_decoder);  // this will clear any previous SetStartPts
+             }
+-            else {
+-                NEXUS_SimpleVideoDecoder_SetStartPts(decoder->video_decoder, start_pts);
+-            }
++            decoder->start_pts = start_pts; // set the start_pts to the new segStart
+         }
+ 
+         rv = gst_pad_push_event(decoder->src_pad, event);
+diff --git a/reference/videodecode/src/gst_brcm_video_decoder.h b/reference/videodecode/src/gst_brcm_video_decoder.h
+index e5ae0c4..b3142a2 100755
+--- a/reference/videodecode/src/gst_brcm_video_decoder.h
++++ b/reference/videodecode/src/gst_brcm_video_decoder.h
+@@ -147,6 +147,7 @@ struct _GstBrcmVideoDecoder
+     unsigned long current_pts;
+     gboolean current_pts_valid;
+     unsigned long first_pts;
++    unsigned long start_pts;                    /* save the segment start pts , clear on flush event, expecting new segment */
+     gint64 disco_adjust_pts;                    /* PTS offset accumulator for rollovers and discontinuities, use this + first and current PTS to get running position */
+     gint64 position;                            /* gstreamer time position, 100ns */
+     gint64 position_keeper;
+-- 
+2.7.4
+

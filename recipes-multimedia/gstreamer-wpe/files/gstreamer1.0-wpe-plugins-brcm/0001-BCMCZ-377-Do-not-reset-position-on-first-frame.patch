@@ -1,7 +1,7 @@
-From 7c23b19945bc218f2c40e94def1330e50275b38a Mon Sep 17 00:00:00 2001
+From 2e35275263e7ccfd7b56572151c16b777428d6c2 Mon Sep 17 00:00:00 2001
 From: "k.plata" <k.plata@metrological.com>
 Date: Mon, 31 Jan 2022 14:09:01 +0000
-Subject: [PATCH] BCMCZ-377: Do not reset position on first frame
+Subject: [PATCH 1/6] BCMCZ-377: Do not reset position on first frame
 
 This commit removes resetting the decoder->position variable in
 picture_ready_cb. If an application was querying the position

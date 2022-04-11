@@ -1,7 +1,7 @@
-From bb9c6ec7baf3bc30115ad41da2b08845c550f8f4 Mon Sep 17 00:00:00 2001
+From a4df0f455801bfc7a812cef9f3a996ce16e02535 Mon Sep 17 00:00:00 2001
 From: krp97 <k.plata@metrological.com>
 Date: Wed, 1 Sep 2021 13:45:37 +0000
-Subject: [PATCH] Configure sinks to use the async mode
+Subject: [PATCH 6/6] Configure sinks to use the async mode
 
 This commit configures brcmaudiosink and brcmvideosink to use the async
 mode during state transition. During a READY -> PAUSED state change,
@@ -16,7 +16,7 @@ will retry to freeze the system clock.
  2 files changed, 3 insertions(+), 3 deletions(-)
 
 diff --git a/reference/audiosink/src/gst_brcm_audio_sink.c b/reference/audiosink/src/gst_brcm_audio_sink.c
-index 0c62247..07b5e1d 100755
+index 83f80be..60a25dc 100644
 --- a/reference/audiosink/src/gst_brcm_audio_sink.c
 +++ b/reference/audiosink/src/gst_brcm_audio_sink.c
 @@ -51,7 +51,7 @@
@@ -38,7 +38,7 @@ index 0c62247..07b5e1d 100755
      /* for bluetooth */
      char * audioDelay = getenv ("GST_AUDIO_OUTPUT_DELAY_MS");
 diff --git a/reference/videosink/src/gst_brcm_video_sink.c b/reference/videosink/src/gst_brcm_video_sink.c
-index c64e546..92e4b25 100755
+index 66f9196..a9b289a 100755
 --- a/reference/videosink/src/gst_brcm_video_sink.c
 +++ b/reference/videosink/src/gst_brcm_video_sink.c
 @@ -304,7 +304,7 @@ static void gst_brcm_video_sink_init (Gstbrcmvideosink *sink) {

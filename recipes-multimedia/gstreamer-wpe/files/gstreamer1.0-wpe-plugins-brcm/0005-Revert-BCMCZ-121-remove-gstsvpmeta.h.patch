@@ -1,7 +1,7 @@
-From e7ceef39c847dbfc12cce969c9dd9d82aba53f93 Mon Sep 17 00:00:00 2001
+From 41f1e0b7a77bf3a5c6ffd120541505d2b346df0b Mon Sep 17 00:00:00 2001
 From: krp97 <k.plata576@gmail.com>
 Date: Wed, 21 Jul 2021 11:45:14 +0000
-Subject: [PATCH 2/5] Revert "BCMCZ-121: remove gstsvpmeta.h"
+Subject: [PATCH 5/6] Revert "BCMCZ-121: remove gstsvpmeta.h"
 
 This commit removes a header file that is normally present
 in an unspecified patch file.
@@ -12,22 +12,24 @@ This reverts commit 6584b71d647c5b31869959767632e9db794ce21b.
 Hash based on RDKCentral repo:
 https://code.rdkcentral.com/r/collaboration/rdk/components/generic/gst-plugins-soc/soc/broadcom
 ---
- reference/util/src/gst_svp_util.h |   3 +-
+ reference/util/src/gst_svp_util.h |   5 +-
  reference/util/src/gstsvpmeta.h   | 101 ++++++++++++++++++++++++++++++++++++++
- 2 files changed, 102 insertions(+), 2 deletions(-)
+ 2 files changed, 104 insertions(+), 2 deletions(-)
  create mode 100644 reference/util/src/gstsvpmeta.h
 
 diff --git a/reference/util/src/gst_svp_util.h b/reference/util/src/gst_svp_util.h
-index a4d2b5b..fa86919 100755
+index 81b3eec..e89a343 100755
 --- a/reference/util/src/gst_svp_util.h
 +++ b/reference/util/src/gst_svp_util.h
-@@ -51,8 +51,7 @@
- #include "nexus_security.h"
+@@ -53,8 +53,9 @@
+ #include "astra_crypto_types.h"
+ #include "libvpucom_api.h"
  #endif
- #ifndef BGST_SVP_SECBUF
 -#include "nexus_memory.h"
 -#include <gst/gstsvpmeta.h>
++#ifndef BGST_SVP_SECBUF
 +#include "gstsvpmeta.h"
++#endif
  
  gboolean svp_util_open(void);
  void svp_util_close();
