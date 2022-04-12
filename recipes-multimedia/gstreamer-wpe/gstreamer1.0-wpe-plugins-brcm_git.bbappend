@@ -12,8 +12,8 @@ SRC_URI_append = " \
     file://0002-BCMCZ-379-Refactor-position-query-handling.patch \
     file://0003-BCMCZ-376-BCOM-6082-Potential-video-buffer-flushed-o.patch \
     file://0004-BCMCZ-378-audfilter-svp-optimization.patch \
-    file://0005-Revert-BCMCZ-121-remove-gstsvpmeta.h.patch \
-    file://0006-Configure-sinks-to-use-the-async-mode.patch \
+    file://0005-Configure-sinks-to-use-the-async-mode.patch \
+    file://0006-BCMCZ-381-Add-BGST_SVP_LGI-and-set-BGST_SVP_META-as-.patch \
 "
 
 SRCREV = "30b63420cc4867728e2d260706a1bf96263bef30"

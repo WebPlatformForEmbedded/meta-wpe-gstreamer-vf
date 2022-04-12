@@ -1,0 +1,227 @@
+From e4a973e36fe5e30c2fdf30707193ee2bbe2a36f0 Mon Sep 17 00:00:00 2001
+From: David Koo <david.koo@broadcom.com>
+Date: Mon, 11 Apr 2022 14:40:32 -0400
+Subject: [PATCH] BCMCZ-381 : Add BGST_SVP_LGI and set BGST_SVP_META as default
+
+Change-Id: I0864716b54e5482786d2ae80f266ba60f9fa3fb6
+---
+ configure.ac                                  | 13 +++++++++++++
+ reference/audfilter/src/Makefile.am           |  8 +++++---
+ reference/audfilter/src/gst_brcm_aud_filter.c |  6 ++----
+ reference/util/src/Makefile.am                |  4 ++--
+ reference/util/src/gst_svp_util.c             |  2 ++
+ reference/util/src/gst_svp_util.h             |  4 ++++
+ reference/vidfilter/src/Makefile.am           |  8 +++++---
+ reference/vidfilter/src/gst_brcm_vid_filter.c |  6 ++----
+ 8 files changed, 35 insertions(+), 16 deletions(-)
+ mode change 100644 => 100755 reference/vidfilter/src/Makefile.am
+
+diff --git a/configure.ac b/configure.ac
+index aac12bd..5a5021e 100755
+--- a/configure.ac
++++ b/configure.ac
+@@ -87,6 +87,7 @@ ENABLE_SVP=" "
+ ENABLE_ASTRA=" "
+ ENABLE_SVP_META=true
+ ENABLE_SVP_SECBUF=" "
++ENABLE_SVP_LGI=" "
+ dnl  Default is FALSE until we have it validated
+ ENABLE_REFERENCE_PLUGINS=true
+ 
+@@ -259,6 +260,18 @@ AC_ARG_ENABLE([playersinkbin],
+        		esac
+     	      ],
+     	      [PLUGIN_SRC="$PLUGIN_SRC playersinkbin/src"])
++AC_ARG_ENABLE([svplgi],
++              AS_HELP_STRING([--enable-svplgi],[enable svplgi (default is no)]),
++              [
++                case "${enableval}" in
++                 yes) ENABLE_SVP_LGI=true;;
++                 no)  ENABLE_SVP_LGI=false
++                      AC_MSG_ERROR([svplgi is disabled]) ;;
++                 *) AC_MSG_ERROR([bad value ${enableval} for --enable-svplgi]) ;;
++                esac
++              ],
++              [echo "svplgi is disabled"])
++AM_CONDITIONAL([ENABLE_SVP_LGI], [test x$ENABLE_SVP_LGI = xtrue])
+ AC_ARG_ENABLE([svp],
+               AS_HELP_STRING([--enable-svp],[enable svp (default is no)]),
+               [
+diff --git a/reference/audfilter/src/Makefile.am b/reference/audfilter/src/Makefile.am
+index e8aa587..8bbde55 100755
+--- a/reference/audfilter/src/Makefile.am
++++ b/reference/audfilter/src/Makefile.am
+@@ -40,16 +40,18 @@
+ 
+ AM_CFLAGS = $(NEXUS_CFLAGS) $(GST_CFLAGS)
+ AM_LDFLAGS = $(GST_LIBS) $(GSTBASE_LIBS) -lnxclient $(GST_SVP_LIBS)
+-if ENABLE_SVP
+-AM_CFLAGS += -DBGST_SVP_SUPPORT
+ if ENABLE_SVP_SECBUF
+ AM_CFLAGS += -DBGST_SVP_SECBUF
+ AM_LDFLAGS += -lb_secbuf
+-endif
++else
++if ENABLE_SVP_LGI
++AM_CFLAGS += -DBGST_SVP_LGI
++else
+ if ENABLE_SVP_META
+ AM_CFLAGS += -DBGST_SVP_META
+ endif
+ endif
++endif
+ 
+ plugin_LTLIBRARIES = libbrcmaudfilter.la
+ 
+diff --git a/reference/audfilter/src/gst_brcm_aud_filter.c b/reference/audfilter/src/gst_brcm_aud_filter.c
+index f8f761f..292b238 100755
+--- a/reference/audfilter/src/gst_brcm_aud_filter.c
++++ b/reference/audfilter/src/gst_brcm_aud_filter.c
+@@ -1479,8 +1479,7 @@ static GstFlowReturn gst_brcm_aud_filter_chain (GstPad *pad, GstObject *parent,
+                 batom_accum_add_range(filter->src, buf_ptr, buf_size);
+                 atom = batom_from_accum(filter->src, NULL, NULL);
+             }
+-#else
+-#ifdef BGST_SVP_META
++#elif BGST_SVP_META
+             GstBrcmSvpMeta* meta = NULL;
+ 
+             meta = gst_buffer_get_brcm_svp_meta(buf);
+@@ -1503,7 +1502,7 @@ static GstFlowReturn gst_brcm_aud_filter_chain (GstPad *pad, GstObject *parent,
+                 batom_accum_add_range(filter->src, buf_ptr, buf_size);
+                 atom = batom_from_accum(filter->src, NULL, NULL);
+             }
+-#else
++#elif BGST_SVP_LGI
+             GstSvpMeta* meta = NULL;
+ 
+             meta = gst_buffer_get_svp_meta(buf);
+@@ -1560,7 +1559,6 @@ static GstFlowReturn gst_brcm_aud_filter_chain (GstPad *pad, GstObject *parent,
+                 atom = batom_from_accum(filter->src, NULL, NULL);
+             }
+ #endif
+-#endif
+         } else { // no svp
+             batom_accum_clear(filter->src);
+             batom_accum_add_range(filter->src, buf_ptr, buf_size);
+diff --git a/reference/util/src/Makefile.am b/reference/util/src/Makefile.am
+index 78b5e93..7ff20cf 100755
+--- a/reference/util/src/Makefile.am
++++ b/reference/util/src/Makefile.am
+@@ -40,8 +40,8 @@
+ 
+ AM_CFLAGS = $(NEXUS_CFLAGS) $(GST_CFLAGS)
+ AM_LDFLAGS = $(GST_LIBS) -lnxclient $(GST_SVP_LIBS)
+-if ENABLE_SVP
+-AM_CFLAGS += -DBGST_SVP_SUPPORT
++if ENABLE_SVP_LGI
++AM_CFLAGS += -DBGST_SVP_LGI
+ endif
+ if ENABLE_ASTRA
+ AM_LDFLAGS += -lbcm_vpucom
+diff --git a/reference/util/src/gst_svp_util.c b/reference/util/src/gst_svp_util.c
+index 5d8f29b..f2856da 100755
+--- a/reference/util/src/gst_svp_util.c
++++ b/reference/util/src/gst_svp_util.c
+@@ -609,6 +609,7 @@ void svp_util_free_decrypted_buffer(uint8_t* buffer)
+     svp_util_secure_heap_free(buffer);
+ }
+ 
++#ifdef BGST_SVP_LGI
+ uint8_t *svp_extract_secure_buffer_ptr_from_meta(GstBuffer *buf, GstSvpMeta* meta)
+ {
+     uint8_t *decrypted = NULL;
+@@ -656,6 +657,7 @@ uint8_t *svp_extract_secure_buffer_ptr_from_meta(GstBuffer *buf, GstSvpMeta* met
+     }
+     return decrypted;
+ }
++#endif
+ 
+ void release_secure_buffer_block_callback(void* buffer)
+ {
+diff --git a/reference/util/src/gst_svp_util.h b/reference/util/src/gst_svp_util.h
+index 81b3eec..82d263b 100755
+--- a/reference/util/src/gst_svp_util.h
++++ b/reference/util/src/gst_svp_util.h
+@@ -54,7 +54,9 @@
+ #include "libvpucom_api.h"
+ #endif
+ #include "nexus_memory.h"
++#ifdef BGST_SVP_LGI
+ #include <gst/gstsvpmeta.h>
++#endif
+ 
+ gboolean svp_util_open(void);
+ void svp_util_close();
+@@ -64,7 +66,9 @@ gboolean svp_util_private_copy(void *pDest, const void *pSrc, size_t nSize, bool
+ uint8_t* svp_util_get_whole_decrypted_buffer(uint8_t *buf_ptr, int buf_size, uint8_t* decrypted, uint32_t *subsamplesinfo, unsigned subsamplescount);
+ uint8_t* svp_util_simulate_decrypted_buffer(uint8_t *buf_ptr, int buf_size);
+ void svp_util_free_decrypted_buffer(uint8_t* buffer);
++#ifdef BGST_SVP_LGI
+ uint8_t *svp_extract_secure_buffer_ptr_from_meta(GstBuffer *buf, GstSvpMeta* meta);
++#endif
+ void release_secure_buffer_block_callback(void*);
+ uint32_t svp_util_copy_atom(void *pDest, batom_t atom);
+ batom_t svp_util_decrypted_atom(batom_accum_t acc, uint8_t *buf_ptr, int buf_size, uint8_t* decrypted, uint32_t *subsamplesinfo, unsigned subsamplescount);
+diff --git a/reference/vidfilter/src/Makefile.am b/reference/vidfilter/src/Makefile.am
+old mode 100644
+new mode 100755
+index cf42e25..f352c83
+--- a/reference/vidfilter/src/Makefile.am
++++ b/reference/vidfilter/src/Makefile.am
+@@ -40,16 +40,18 @@
+ 
+ AM_CFLAGS = $(NEXUS_CFLAGS) $(GST_CFLAGS) 
+ AM_LDFLAGS = $(GST_LIBS) $(GSTBASE_LIBS) -lnxclient $(GST_SVP_LIBS)
+-if ENABLE_SVP
+-AM_CFLAGS += -DBGST_SVP_SUPPORT
+ if ENABLE_SVP_SECBUF
+ AM_CFLAGS += -DBGST_SVP_SECBUF
+ AM_LDFLAGS += -lb_secbuf
+-endif
++else
++if ENABLE_SVP_LGI
++AM_CFLAGS += -DBGST_SVP_LGI
++else
+ if ENABLE_SVP_META
+ AM_CFLAGS += -DBGST_SVP_META
+ endif
+ endif
++endif
+ plugin_LTLIBRARIES = libbrcmvidfilter.la
+ 
+ libbrcmvidfilter_la_SOURCES = gst_brcm_p_h264_repack.c  gst_brcm_vid_filter.c
+diff --git a/reference/vidfilter/src/gst_brcm_vid_filter.c b/reference/vidfilter/src/gst_brcm_vid_filter.c
+index 1b4d8ce..58b0f04 100755
+--- a/reference/vidfilter/src/gst_brcm_vid_filter.c
++++ b/reference/vidfilter/src/gst_brcm_vid_filter.c
+@@ -1752,8 +1752,7 @@ static GstFlowReturn gst_brcm_vid_filter_chain (GstPad *pad, GstObject *parent,
+                 atom = batom_from_accum(filter->src, NULL, NULL);
+             }
+ 
+-#else
+-#ifdef BGST_SVP_META
++#elif BGST_SVP_META
+             GstBrcmSvpMeta* meta = NULL;
+ 
+             meta = gst_buffer_get_brcm_svp_meta(buf);
+@@ -1777,7 +1776,7 @@ static GstFlowReturn gst_brcm_vid_filter_chain (GstPad *pad, GstObject *parent,
+                 batom_accum_add_range(filter->src, buf_ptr, buf_size);
+                 atom = batom_from_accum(filter->src, NULL, NULL);
+             }
+-#else
++#elif BGST_SVP_LGI
+             GstSvpMeta* meta = NULL;
+ 
+             meta = gst_buffer_get_svp_meta(buf);
+@@ -1833,7 +1832,6 @@ static GstFlowReturn gst_brcm_vid_filter_chain (GstPad *pad, GstObject *parent,
+                 batom_accum_add_range(filter->src, buf_ptr, buf_size);
+                 atom = batom_from_accum(filter->src, NULL, NULL);
+             }
+-#endif      // BGST_SVP_META
+ #endif      // BGST_SVP_SECBUF
+         } else  {   // NO SVP
+             batom_accum_clear(filter->src);
+-- 
+2.7.4
+
