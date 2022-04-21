@@ -8,7 +8,7 @@ RDEPENDS_${PN} = "mpg123"
 PROVIDES = "virtual/gst-wpe-plugins-playersinkbin"
 RPROVIDES_${PN} = "virtual/gst-wpe-plugins-playersinkbin"
 
-SRC_URI = "git://git@github.com/Metrological/gstreamer-plugins-soc.git;protocol=ssh;branch=18.1-rdkv-20180416"
+SRC_URI = "git://github.com/Metrological/gstreamer-plugins-soc.git;protocol=https;branch=18.1-rdkv-20180416"
 SRCREV = "98ec02b612f2051ac449c7fdea11a430eed07255"
 
 S = "${WORKDIR}/git"
