@@ -5,7 +5,7 @@ DEPENDS = "gstreamer1.0-wpe gstreamer1.0-wpe-plugins-base glib-2.0 glib-2.0-nati
 
 PACKAGECONFIG_append = "svp"
 
-SRC_URI_remove = "git://git@github.com/Metrological/bcm-gstreamer.git;protocol=ssh;branch=${GST_BCM_VERSION_BRANCH}"
+SRC_URI_remove = "git://github.com/Metrological/bcm-gstreamer.git;protocol=https;branch=${GST_BCM_VERSION_BRANCH}"
 SRC_URI_append = " \
     git://code.rdkcentral.com/r/collaboration/rdk/components/generic/gst-plugins-soc/soc/broadcom;protocol=https;branch=master \
     file://0001-BCMCZ-365-Retry-resize-of-video-surface-in-preroll.patch \
