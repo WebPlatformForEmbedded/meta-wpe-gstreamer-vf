@@ -11,40 +11,40 @@ LICENSE = "CLOSED"
 PROVIDES_append = " gstreamer1.0-wpe-plugins-brcm"
 
 # inherit PV from original recipe
-PV = "1.0+gitAUTOINC+5534aa56df-e3beb00-r0"
+PV = "1.0+gitAUTOINC+5534aa56df-9397b89-r0"
 SRC_URI = " \
-    file://gstreamer1.0-wpe-plugins-brcm-1.0+gitAUTOINC+5534aa56df-e3beb00-r0.tar.gz;subdir=binaries-source \
+    file://gstreamer1.0-wpe-plugins-brcm-1.0+gitAUTOINC+5534aa56df-9397b89-r0.tar.gz;subdir=binaries-source \
 "
-SRC_URI[md5sum] = "57a4de563926cd952b2304a6afb79f08"
-SRC_URI[sha256sum] = "603682102c8132aa632f1f34dc293cedd41675fcb1f48575612fca0909d599b9"
+SRC_URI[md5sum] = "97ab61a6e41d4c140cb7e39a11812289"
+SRC_URI[sha256sum] = "d1d68b28c94abb7a5a18b5f89b2784f4aeb4511a86c136cf6b7a12f3feb43af7"
 
 S = "${WORKDIR}/binaries-source"
 
 FILES_SOLIBSDEV = ""
 
 FILES_${PN}_append = " \
-    ${libdir}/gstreamer-1.0-wpe/libbrcmvidfilter.so \
-    ${libdir}/gstreamer-1.0-wpe/libbrcmgstutil.so \
-    ${libdir}/gstreamer-1.0-wpe/libbrcmpcmsink.so \
-    ${libdir}/gstreamer-1.0-wpe/libbrcmvideodecoder.so \
-    ${libdir}/gstreamer-1.0-wpe/libbrcmaudfilter.so \
+    ${libdir}/libbrcmsvpmeta.so \
     ${libdir}/gstreamer-1.0-wpe/libbrcmaudiosink.so \
     ${libdir}/gstreamer-1.0-wpe/libbrcmaudiodecoder.so \
+    ${libdir}/gstreamer-1.0-wpe/libbrcmvidfilter.so \
+    ${libdir}/gstreamer-1.0-wpe/libbrcmaudfilter.so \
+    ${libdir}/gstreamer-1.0-wpe/libbrcmvideodecoder.so \
+    ${libdir}/gstreamer-1.0-wpe/libbrcmgstutil.so \
+    ${libdir}/gstreamer-1.0-wpe/libbrcmpcmsink.so \
     ${libdir}/gstreamer-1.0-wpe/libbrcmvideosink.so \
-    ${libdir}/libbrcmsvpmeta.so \
  "
 FILES_${PN}-dev_append = " \
     ${includedir}/gstreamer-wpe/gst_brcm_svp_meta.h \
     ${includedir}/gst_brcm_svp_meta.h \
-    ${libdir}/gstreamer-1.0-wpe/libbrcmvidfilter.la \
-    ${libdir}/gstreamer-1.0-wpe/libbrcmpcmsink.la \
-    ${libdir}/gstreamer-1.0-wpe/libbrcmgstutil.la \
-    ${libdir}/gstreamer-1.0-wpe/libbrcmaudfilter.la \
-    ${libdir}/gstreamer-1.0-wpe/libbrcmvideodecoder.la \
+    ${libdir}/libbrcmsvpmeta.la \
     ${libdir}/gstreamer-1.0-wpe/libbrcmaudiodecoder.la \
     ${libdir}/gstreamer-1.0-wpe/libbrcmaudiosink.la \
+    ${libdir}/gstreamer-1.0-wpe/libbrcmpcmsink.la \
     ${libdir}/gstreamer-1.0-wpe/libbrcmvideosink.la \
-    ${libdir}/libbrcmsvpmeta.la \
+    ${libdir}/gstreamer-1.0-wpe/libbrcmvideodecoder.la \
+    ${libdir}/gstreamer-1.0-wpe/libbrcmvidfilter.la \
+    ${libdir}/gstreamer-1.0-wpe/libbrcmgstutil.la \
+    ${libdir}/gstreamer-1.0-wpe/libbrcmaudfilter.la \
  "
 FILES_${PN}-doc_append = " "
 FILES_${PN}-locale_append = " "
