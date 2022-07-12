@@ -15,8 +15,8 @@ PV = "1.0+gitAUTOINC+5534aa56df-dc50a72-r0"
 SRC_URI = " \
     file://gstreamer1.0-wpe-plugins-brcm-1.0+gitAUTOINC+5534aa56df-dc50a72-r0.tar.gz;subdir=binaries-source \
 "
-SRC_URI[md5sum] = "9d43936473ebb2407532d7277c4f8811"
-SRC_URI[sha256sum] = "30852f9278eed8ee0726db4f09b429e47256fc0ccfa4ff09a312313ad72bf25e"
+SRC_URI[md5sum] = "66f2a697cb431f5113f12f5d3d3f5023"
+SRC_URI[sha256sum] = "30754d7d0f09f8bb1e6f7a8ca0b8ec0c7d88a93c84cd4ab6452cf4dd48c3d5a9"
 
 S = "${WORKDIR}/binaries-source"
 
