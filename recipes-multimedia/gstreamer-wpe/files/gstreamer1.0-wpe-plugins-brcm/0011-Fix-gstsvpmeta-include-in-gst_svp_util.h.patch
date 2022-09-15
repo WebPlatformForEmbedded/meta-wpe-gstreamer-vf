@@ -1,0 +1,25 @@
+From bc15e6881b5e552e8d602444f642b7ef438f2574 Mon Sep 17 00:00:00 2001
+From: Artur Gebicz <45754882+404ag@users.noreply.github.com>
+Date: Wed, 14 Sep 2022 12:29:04 +0000
+Subject: [PATCH 4/4] Fix gstsvpmeta include in gst_svp_util.h
+
+---
+ reference/util/src/gst_svp_util.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/reference/util/src/gst_svp_util.h b/reference/util/src/gst_svp_util.h
+index 9643eb4..a03a8cd 100755
+--- a/reference/util/src/gst_svp_util.h
++++ b/reference/util/src/gst_svp_util.h
+@@ -51,7 +51,7 @@
+ #include "nexus_security.h"
+ #endif
+ #include "nexus_memory.h"
+-#include <gst/gstsvpmeta.h>
++#include "gstsvpmeta.h"
+ 
+ gboolean svp_util_open(void);
+ void svp_util_close();
+-- 
+2.7.4
+

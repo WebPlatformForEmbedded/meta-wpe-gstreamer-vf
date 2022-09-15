@@ -1,0 +1,174 @@
+From 7fa786c4669d75f9ac1c2f19337ce18cdc50d299 Mon Sep 17 00:00:00 2001
+From: David Koo <david.koo@broadcom.com>
+Date: Fri, 17 Sep 2021 15:45:08 -0400
+Subject: [PATCH 2/4] BCMCZ-334 : vidfilter svp optimization - fix build issue
+ with old ursr
+
+refs #SWRDKV-2556
+
+Change-Id: I9f2622894297ac925057f76e1d77c11873f2c3d6
+---
+ reference/vidfilter/src/gst_brcm_p_h264_repack.c | 55 +++++++++++++++++++++---
+ reference/vidfilter/src/gst_brcm_vid_filter.c    |  4 +-
+ reference/vidfilter/src/gst_brcm_vid_filter.h    | 17 +++++++-
+ 3 files changed, 68 insertions(+), 8 deletions(-)
+
+diff --git a/reference/vidfilter/src/gst_brcm_p_h264_repack.c b/reference/vidfilter/src/gst_brcm_p_h264_repack.c
+index b8da505..2d4c7ba 100755
+--- a/reference/vidfilter/src/gst_brcm_p_h264_repack.c
++++ b/reference/vidfilter/src/gst_brcm_p_h264_repack.c
+@@ -703,7 +703,7 @@ batom_t gst_brcm_p_process_payload_vpx_bpp(GstBrcmVidFilter *filter, batom_t ato
+ {
+     batom_t atom = NULL;
+     bmedia_bpp_pkt bpp;
+-    void *bpp_buf = bmedia_frame_buf_alloc(&filter->frame_allocator, B_MPEG2PES_BPP_LENGTH);
++    void *bpp_buf = gst_brcm_p_frame_buf_alloc(&filter->frame_allocator, B_MPEG2PES_BPP_LENGTH);
+ 
+     if(bpp_buf) {
+         batom_accum_clear(filter->dst);
+@@ -726,7 +726,7 @@ batom_t gst_brcm_p_process_payload_vpx(GstBrcmVidFilter *filter, batom_t atom_es
+ {
+     batom_t atom = NULL;
+     const size_t header_len = BMEDIA_FIELD_LEN("size", uint32_t) + BMEDIA_FIELD_LEN("type", uint16_t);
+-    uint8_t *hdr = bmedia_frame_buf_alloc(&filter->frame_allocator, header_len);
++    uint8_t *hdr = gst_brcm_p_frame_buf_alloc(&filter->frame_allocator, header_len);
+ 
+     if(!hdr) {
+         goto error;
+@@ -753,9 +753,9 @@ batom_t gst_brcm_p_process_payload_av1(GstBrcmVidFilter *filter, batom_t atom_es
+ {
+     batom_cursor block;
+     const unsigned header_len = BMEDIA_FIELD_LEN("size", uint32_t) + BMEDIA_FIELD_LEN("type", uint16_t);
+-    uint8_t *hdr = bmedia_frame_buf_alloc(&filter->frame_allocator, header_len);
++    uint8_t *hdr = gst_brcm_p_frame_buf_alloc(&filter->frame_allocator, header_len);
+     unsigned max_obu = 64;
+-    uint8_t *obu_frame = bmedia_frame_buf_alloc(&filter->frame_allocator, header_len + 4 * max_obu);
++    uint8_t *obu_frame = gst_brcm_p_frame_buf_alloc(&filter->frame_allocator, header_len + 4 * max_obu);
+     unsigned parsed_payload = 0;
+     unsigned obu_count = 0;
+     batom_cursor cursor;
+@@ -814,7 +814,7 @@ batom_t gst_brcm_p_process_payload_av1(GstBrcmVidFilter *filter, batom_t atom_es
+                 goto err_bad_obu;
+             }
+             obu_hdr[0] = (uint8_t)obu_header;
+-            B_MEDIA_SAVE_UINT24_BE(obu_hdr+1, obu_size+obu_header_size);
++            GST_BRCM_SAVE_UINT24_BE(obu_hdr+1, obu_size+obu_header_size);
+         }
+         obu_count++;
+         if(parsed_payload>=payload_size) {
+@@ -863,3 +863,48 @@ uint32_t gst_brcm_p_copy_atom(void *playpump_buffer, batom_t atom_pes)
+ 
+     return data_size;
+ }
++
++void gst_brcm_p_frame_buf_init(struct gst_brcm_p_frame_buf_allocator *allocator, void *buf, unsigned length)
++{
++    allocator->buf = buf;
++    allocator->length = length;
++    allocator->off = 0;
++    allocator->persistent_off = 0;
++    return;
++}
++
++void *gst_brcm_p_frame_buf_alloc(struct gst_brcm_p_frame_buf_allocator *allocator, unsigned size)
++{
++    if(allocator->off + size < allocator->length) {
++        void *result = (uint8_t *)allocator->buf + allocator->off;
++        allocator->off += size;
++        return result;
++    }
++    GST_ERROR("gst_brcm_p_frame_buf_alloc%p out of memory %u,%u,%u,%u", (void *)allocator, size, allocator->off, allocator->persistent_off, allocator->length);
++    return NULL;
++}
++
++void *gst_brcm_p_frame_buf_alloc_persistent(struct gst_brcm_p_frame_buf_allocator *allocator, unsigned size)
++{
++    if(allocator->persistent_off == allocator->off) {
++        void *result = gst_brcm_p_frame_buf_alloc(allocator, size);
++        allocator->persistent_off = allocator->off;
++        return result;
++    } else {
++        GST_ERROR("Not supported");
++        return NULL;
++    }
++}
++
++unsigned gst_brcm_p_frame_buf_available(struct gst_brcm_p_frame_buf_allocator *allocator)
++{
++    return allocator->length - allocator->off;
++}
++
++void gst_brcm_p_frame_buf_clear(struct gst_brcm_p_frame_buf_allocator *allocator)
++{
++    GST_TRACE("gst_brcm_p_frame_buf_clear%p used %u[%u]", (void *)allocator, allocator->off, allocator->length - allocator->persistent_off);
++    allocator->off = allocator->persistent_off;
++    return;
++}
++
+diff --git a/reference/vidfilter/src/gst_brcm_vid_filter.c b/reference/vidfilter/src/gst_brcm_vid_filter.c
+index a048994..01d4261 100755
+--- a/reference/vidfilter/src/gst_brcm_vid_filter.c
++++ b/reference/vidfilter/src/gst_brcm_vid_filter.c
+@@ -552,7 +552,7 @@ static NEXUS_Error nexus_alloc(GstBrcmVidFilter *filter)
+     NEXUS_PlaypumpOpenSettings playpumpOpenSettings;
+     NEXUS_PlaypumpSettings  settings;
+ 
+-    bmedia_frame_buf_init(&filter->frame_allocator, filter->frame_buf, sizeof(filter->frame_buf));
++    gst_brcm_p_frame_buf_init(&filter->frame_allocator, filter->frame_buf, sizeof(filter->frame_buf));
+     filter->factory = batom_factory_create(bkni_alloc, 64);
+     filter->src = batom_accum_create(filter->factory);
+     filter->dst = batom_accum_create(filter->factory);
+@@ -1863,7 +1863,7 @@ static GstFlowReturn gst_brcm_vid_filter_chain (GstPad *pad, GstObject *parent,
+ #endif
+         NEXUS_Playpump_WriteComplete(filter->playpump, 0, data_size);
+ 
+-        bmedia_frame_buf_clear(&filter->frame_allocator);
++        gst_brcm_p_frame_buf_clear(&filter->frame_allocator);
+ 
+ #ifdef BGST_SVP_SUPPORT
+ #ifdef BGST_SVP_SECBUF
+diff --git a/reference/vidfilter/src/gst_brcm_vid_filter.h b/reference/vidfilter/src/gst_brcm_vid_filter.h
+index 8bdb529..86a4a75 100755
+--- a/reference/vidfilter/src/gst_brcm_vid_filter.h
++++ b/reference/vidfilter/src/gst_brcm_vid_filter.h
+@@ -94,6 +94,15 @@ typedef struct _GstBrcmVidFilterClass GstBrcmVidFilterClass;
+ #define CONTENT_LIGHT_STR_MAX_LEN   20
+ #endif
+ 
++#define GST_BRCM_SAVE_UINT24_BE(b, d) do { (b)[0] =(uint8_t)((d)>>16); (b)[1]=(uint8_t)((d)>>8); (b)[2] = (uint8_t)(d);}while(0)
++
++struct gst_brcm_p_frame_buf_allocator {
++    void *buf;
++    unsigned length; /* length of the buffer */
++    unsigned off; /* offset into the frame buffer */
++    unsigned persistent_off; /* bytes at the end of the frame buff which are allocated for the life of the allocator */
++};
++
+ struct _GstBrcmVidFilter
+ {
+     GstBaseParse element;
+@@ -131,7 +140,7 @@ struct _GstBrcmVidFilter
+ 
+     uint8_t pes_buf[1024];
+ 
+-    struct bmedia_frame_buf_allocator frame_allocator;
++    struct gst_brcm_p_frame_buf_allocator frame_allocator;
+     uint8_t frame_buf[32768];
+     batom_accum_t src, dst;
+     batom_factory_t factory;
+@@ -164,6 +173,12 @@ batom_t gst_brcm_p_process_payload_av1(GstBrcmVidFilter *filter, batom_t atom_es
+ uint32_t gst_brcm_p_copy_atom(void *playpump_buffer, batom_t atom_pes);
+ uint32_t secbuf_export_atom(void *pDest, batom_t atom);
+ 
++void gst_brcm_p_frame_buf_init(struct gst_brcm_p_frame_buf_allocator *allocator, void *buf, unsigned length);
++void *gst_brcm_p_frame_buf_alloc(struct gst_brcm_p_frame_buf_allocator *allocator, unsigned size);
++void *gst_brcm_p_frame_buf_alloc_persistent(struct gst_brcm_p_frame_buf_allocator *allocator, unsigned size);
++unsigned gst_brcm_p_frame_buf_available(struct gst_brcm_p_frame_buf_allocator *allocator);
++void gst_brcm_p_frame_buf_clear(struct gst_brcm_p_frame_buf_allocator *allocator);
++
+ G_END_DECLS
+ 
+ #endif /* __GST_BRCM_VID_FILTER_H__ */
+-- 
+2.7.4
+

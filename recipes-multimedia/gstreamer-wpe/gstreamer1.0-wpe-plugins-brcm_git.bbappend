@@ -15,6 +15,10 @@ SRC_URI_append = " \
     file://0005-BCMCZ-376-Don-t-flush-on-new-segment-event.patch \
     file://0006-BCMCZ-377-Do-not-reset-position-on-first-frame.patch \
     file://0007-BCMCZ-379-Refactor-position-query-handling.patch \
+    file://0008-BCMCZ-334-vidfilter-svp-optimization.patch \
+    file://0009-BCMCZ-334-vidfilter-svp-optimization.patch \
+    file://0010-BCMCZ-400-Improve-SVP-dma-performance.patch \
+    file://0011-Fix-gstsvpmeta-include-in-gst_svp_util.h.patch \
 "
 
 SRCREV = "5534aa56dfea8d3758db59753c539f0be1dba03d"

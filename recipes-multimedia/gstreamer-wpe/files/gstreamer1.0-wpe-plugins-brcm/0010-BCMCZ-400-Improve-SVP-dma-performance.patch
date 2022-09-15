@@ -1,0 +1,80 @@
+From 620e99bab6e38ce22461c42873e2cc2e9101bafd Mon Sep 17 00:00:00 2001
+From: David Koo <david.koo@broadcom.com>
+Date: Thu, 8 Sep 2022 14:36:16 -0400
+Subject: [PATCH 3/4] BCMCZ-400 : Improve SVP dma performance
+
+Preallocate heap for SVP dma and remove unnecessary allocation/free in svp_util_copy_atom()
+
+Change-Id: I8256132098b44da34e668b607c9c189f399076a6
+---
+ reference/util/src/gst_svp_util.c | 16 +++++++++++++---
+ 1 file changed, 13 insertions(+), 3 deletions(-)
+ mode change 100755 => 100644 reference/util/src/gst_svp_util.c
+
+diff --git a/reference/util/src/gst_svp_util.c b/reference/util/src/gst_svp_util.c
+old mode 100755
+new mode 100644
+index a3666e6..f9cf3c7
+--- a/reference/util/src/gst_svp_util.c
++++ b/reference/util/src/gst_svp_util.c
+@@ -43,6 +43,7 @@
+ #ifdef BGST_SVP_SUPPORT
+ 
+ #define MAX_SVP_DMA_BLOCKS 256
++#define NEXUS_HEAP_PAD_SIZE (512*1024)
+ 
+ typedef struct {
+     NEXUS_DmaJobHandle dmaJob;
+@@ -51,6 +52,8 @@ typedef struct {
+     BKNI_EventHandle dma_event;
+     uint8_t *generic_heap;
+     uint8_t *secure_heap;
++    uint8_t *nexus_heap;
++    uint32_t nexus_heap_size;
+     uint32_t refcnt;
+ } svp_util_t;
+ 
+@@ -100,6 +103,8 @@ gboolean svp_util_open(void)
+ 
+     svp_util->refcnt = 0;
+     g_svp_util = svp_util;
++    g_svp_util->nexus_heap_size = NEXUS_HEAP_PAD_SIZE;
++    g_svp_util->nexus_heap = svp_util_nexus_heap_alloc(svp_util->nexus_heap_size);
+ 
+ done:
+     if (g_svp_util) {
+@@ -134,6 +139,8 @@ void svp_util_close(void)
+             g_svp_util->dma_mutex = NULL;
+         }
+ 
++        svp_util_nexus_heap_free(g_svp_util->nexus_heap);
++
+         BKNI_Free(g_svp_util);
+         g_svp_util = NULL;
+     }
+@@ -205,7 +212,12 @@ uint32_t svp_util_copy_atom(void *pDest, batom_t atom)
+ 
+     blockSettings = BKNI_Malloc(nvecs*sizeof(NEXUS_DmaJobBlockSettings));
+     heap_size = batom_len(atom);
+-    nexus_heap = svp_util_nexus_heap_alloc(heap_size);
++    if(g_svp_util->nexus_heap_size < heap_size) {
++        svp_util_nexus_heap_free(g_svp_util->nexus_heap);
++        g_svp_util->nexus_heap_size = heap_size;
++        g_svp_util->nexus_heap = svp_util_nexus_heap_alloc(g_svp_util->nexus_heap_size);
++    }
++    nexus_heap = g_svp_util->nexus_heap;
+     BKNI_Memset(nexus_heap, 0, heap_size);
+ 
+     for (uint32_t i=0; i<nvecs ; i++ ) {
+@@ -246,8 +258,6 @@ uint32_t svp_util_copy_atom(void *pDest, batom_t atom)
+     }
+ 
+ done:
+-    svp_util_nexus_heap_free(nexus_heap);
+-    BKNI_Free(blockSettings);
+     batom_release(atom);
+ 
+     BKNI_ReleaseMutex(g_svp_util->dma_mutex);
+-- 
+2.7.4
+

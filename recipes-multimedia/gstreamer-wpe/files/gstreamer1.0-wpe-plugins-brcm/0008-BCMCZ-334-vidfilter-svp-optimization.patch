@@ -1,0 +1,636 @@
+From f7e39f0e3a5eb9e1d4308108dd93fbfd66842270 Mon Sep 17 00:00:00 2001
+From: David Koo <david.koo@broadcom.com>
+Date: Mon, 8 Mar 2021 18:33:46 -0500
+Subject: [PATCH 1/4] BCMCZ-334 : vidfilter svp optimization - remove a memcpy
+ and a dma for encrypted stream using batom
+
+Change-Id: Id9f114fe06d327f5ada663db09fe7d05aca76191
+---
+ reference/audfilter/src/gst_brcm_aud_filter.h    |   1 +
+ reference/util/src/gst_svp_util.c                |  34 ++++
+ reference/util/src/gst_svp_util.h                |   6 +-
+ reference/vidfilter/src/gst_brcm_p_h264_repack.c | 229 +++++++++++------------
+ reference/vidfilter/src/gst_brcm_vid_filter.c    |  89 +++++----
+ reference/vidfilter/src/gst_brcm_vid_filter.h    |  17 +-
+ 6 files changed, 215 insertions(+), 161 deletions(-)
+
+diff --git a/reference/audfilter/src/gst_brcm_aud_filter.h b/reference/audfilter/src/gst_brcm_aud_filter.h
+index edcd379..5723d37 100755
+--- a/reference/audfilter/src/gst_brcm_aud_filter.h
++++ b/reference/audfilter/src/gst_brcm_aud_filter.h
+@@ -43,6 +43,7 @@
+ #include "../../svpmeta/src/gst_brcm_svp_meta.h"
+ #endif
+ #ifdef BGST_SVP_SECBUF
++#include "../../svpmeta/src/gst_brcm_svp_meta.h"
+ #include "b_secbuf.h"
+ #endif
+ #endif
+diff --git a/reference/util/src/gst_svp_util.c b/reference/util/src/gst_svp_util.c
+index 6f53830..a3666e6 100755
+--- a/reference/util/src/gst_svp_util.c
++++ b/reference/util/src/gst_svp_util.c
+@@ -372,6 +372,40 @@ done:
+     return securedHeap;
+ }
+ 
++batom_t svp_util_decrypted_atom(batom_accum_t acc, uint8_t *buf_ptr, int buf_size, uint8_t* decrypted, uint32_t *subsamplesinfo, unsigned subsamplescount) {
++
++    batom_t atom = NULL;
++    uint32_t clear =0 ;
++    uint32_t enc =0 ;
++    uint32_t offset =0 ;
++    uint32_t enc_offset = 0;
++    uint32_t last=0;
++    batom_accum_clear(acc);
++
++    for (int i = 0; i < subsamplescount; i++) {
++        clear = *subsamplesinfo++;
++        enc = *subsamplesinfo++;
++        offset = *subsamplesinfo++; /* start of subsample in the buf_ptr */
++        if (offset != last) {
++             g_print("svp_util_decrypted_atom: offset %d!= last %d\n", offset, last);
++//             batom_accum_add_range(acc, buf_ptr+last, offset);    // add clear data from gstbuf
++        }
++//        g_print("subsamples[%d]: %d/%d/%d/%d\n", i, clear, enc, offset, enc_offset);
++        if (clear) {
++            batom_accum_add_range(acc, buf_ptr + offset, clear);    // add clear data from gstbuf
++        }
++        if (enc){
++            batom_accum_add_range(acc, decrypted + enc_offset, enc);          // add decrypted data in secured memory from decrypted buffer
++            enc_offset+=enc;
++        }
++        last = offset+clear+enc;
++    }
++
++    atom = batom_from_accum(acc, NULL, NULL);
++
++    return atom;
++}
++
+ uint8_t* svp_util_simulate_decrypted_buffer(uint8_t *buf_ptr, int buf_size)
+ {
+     uint8_t *nexus_heap = NULL;
+diff --git a/reference/util/src/gst_svp_util.h b/reference/util/src/gst_svp_util.h
+index fa86919..9643eb4 100755
+--- a/reference/util/src/gst_svp_util.h
++++ b/reference/util/src/gst_svp_util.h
+@@ -50,8 +50,8 @@
+ #if NEXUS_HAS_SECURITY
+ #include "nexus_security.h"
+ #endif
+-#ifndef BGST_SVP_SECBUF
+-#include "gstsvpmeta.h"
++#include "nexus_memory.h"
++#include <gst/gstsvpmeta.h>
+ 
+ gboolean svp_util_open(void);
+ void svp_util_close();
+@@ -64,5 +64,5 @@ void svp_util_free_decrypted_buffer(uint8_t* buffer);
+ uint8_t *svp_extract_secure_buffer_ptr_from_meta(GstBuffer *buf, GstSvpMeta* meta);
+ void release_secure_buffer_block_callback(void*);
+ uint32_t svp_util_copy_atom(void *pDest, batom_t atom);
+-#endif
++batom_t svp_util_decrypted_atom(batom_accum_t acc, uint8_t *buf_ptr, int buf_size, uint8_t* decrypted, uint32_t *subsamplesinfo, unsigned subsamplescount);
+ #endif
+diff --git a/reference/vidfilter/src/gst_brcm_p_h264_repack.c b/reference/vidfilter/src/gst_brcm_p_h264_repack.c
+index 4af1c3a..b8da505 100755
+--- a/reference/vidfilter/src/gst_brcm_p_h264_repack.c
++++ b/reference/vidfilter/src/gst_brcm_p_h264_repack.c
+@@ -69,14 +69,9 @@ Example:
+ #ifdef BGST_SVP_SUPPORT
+ #ifdef BGST_SVP_SECBUF
+ static void * secbuf_peshdr_realloc(GstBrcmVidFilter *filter, uint32_t hdr_size);
+-static uint32_t secbuf_export_atom(void *pDest, batom_t atom);
+ #endif
+ #endif
+ 
+-#if (AV1_SUPPORTED)
+-static bool gst_brcm_p_process_av1_payload(struct bmedia_frame_buf_allocator *allocator, batom_cursor *cursor, batom_accum_t src, unsigned payload_size, batom_accum_t dst, uint8_t *decryptedBuffer);
+-#endif
+-
+ static int
+ b_get_hex_one(char c)
+ {
+@@ -365,96 +360,6 @@ uint32_t gst_brcm_p_process_frame(GstBrcmVidFilter *filter, uint8_t *buffer, uin
+ }
+ 
+ 
+-uint32_t gst_brcm_p_add_pes_bcmv_header_vpx(GstBrcmVidFilter *filter, void *  playpump_buffer, uint8_t *buf_ptr, uint32_t buf_size, int64_t pts, uint8_t *decryptedBuffer)
+-{
+-    uint8_t es_header[ES_HEADER_SIZE]= {'B', 'C', 'M', 'V', 0, 0, 0, 0, 0, 0};
+-    uint32_t data_size=0;   // total processed data size
+-    uint8_t *buffer = (uint8_t *)playpump_buffer;
+-
+-    B_MEDIA_SAVE_UINT32_BE(&es_header[4], buf_size+ES_HEADER_SIZE);
+-    data_size = gst_brcm_p_process_frame(filter, buffer, es_header, buf_ptr, 0, buf_size, pts, decryptedBuffer);
+-
+-    return data_size;
+-}
+-
+-#if (AV1_SUPPORTED)
+-uint32_t gst_brcm_p_add_pes_bcmv_header_av1(GstBrcmVidFilter *filter, void *  playpump_buffer, uint8_t *buf_ptr, uint32_t buf_size, int64_t pts, uint8_t *decryptedBuffer)
+-{
+-    uint32_t data_size=0;   // total processed data size
+-    void *pes_hdr;
+-    size_t pes_hdr_len;
+-    bmedia_pes_info pes_info;
+-    batom_cursor src_cursor;
+-    batom_t atom = NULL;
+-
+-    batom_accum_add_range(filter->src,buf_ptr,buf_size);
+-    batom_cursor_from_accum(&src_cursor, filter->src);
+-
+-    pes_hdr = bmedia_frame_buf_alloc(&filter->frame_allocator, BMEDIA_PES_HEADER_MAX_SIZE);
+-    if(!pes_hdr) {
+-        goto error;
+-    }
+-
+-    bmedia_pes_info_init(&pes_info, REPACK_VIDEO_PES_ID);
+-
+-    pes_info.pts_valid = TRUE;
+-    pes_info.pts = pts;
+-    pes_hdr_len = bmedia_pes_header_init(pes_hdr, 0, &pes_info); /* insert PES header with length  0 (unbounded) */
+-
+-    batom_accum_add_range(filter->dst, pes_hdr, pes_hdr_len);
+-
+-    if(!gst_brcm_p_process_av1_payload(&filter->frame_allocator, &src_cursor, filter->src, buf_size, filter->dst, decryptedBuffer)) {
+-        goto error;
+-    }
+-
+-    size_t payload_len = batom_accum_len(filter->dst);
+-
+-    if(payload_len > B_MEDIA_MAX_PES_SIZE) {
+-        unsigned pes_hdr_buf_size = bmedia_frame_buf_available(&filter->frame_allocator);
+-
+-        if(pes_hdr_buf_size > 8*1024) {
+-            pes_hdr_buf_size = 8*1024;
+-        }
+-        void *pes_hdr_buf = bmedia_frame_buf_alloc(&filter->frame_allocator, pes_hdr_buf_size);
+-        batom_cursor cursor;
+-
+-        if(pes_hdr_buf==NULL) {
+-            goto error;
+-        }
+-        batom_cursor_from_accum(&cursor, filter->dst);
+-        batom_cursor_skip(&cursor, pes_hdr_len);
+-        batom_accum_trim(filter->dst, &cursor);
+-        atom = bmedia_pes_subdivide_packet(filter->dst, &pes_info, filter->src, pes_hdr_buf, pes_hdr_buf_size, B_MEDIA_MAX_PES_SIZE);
+-    } else {
+-        atom = batom_from_accum(filter->dst, NULL, NULL);
+-        if (payload_len > pes_hdr_len)
+-            bmedia_pes_header_init(pes_hdr, payload_len - pes_hdr_len, &pes_info); /* correct length of PES header */
+-        else
+-            GST_ERROR("invalid length payload_len %zu, pes_hdr_len %zu", payload_len, pes_hdr_len);
+-    }
+-
+-#ifdef BGST_SVP_SUPPORT
+-#ifdef BGST_SVP_SECBUF
+-    data_size = secbuf_export_atom(playpump_buffer, atom);
+-#else
+-    data_size = svp_util_copy_atom(playpump_buffer, atom);
+-#endif
+-#else
+-    data_size = batom_len(atom);
+-    batom_cursor_from_atom(&src_cursor, atom);
+-    batom_cursor_copy(&src_cursor,playpump_buffer,data_size);
+-    batom_release(atom);
+-#endif
+-
+-error:
+-    batom_accum_clear(filter->src);
+-    batom_accum_clear(filter->dst);
+-    bmedia_frame_buf_clear(&filter->frame_allocator);
+-
+-    return data_size;
+-}
+-#endif
+-
+ uint32_t gst_brcm_p_h264_sps_pps_header( void *  codec_data, void * hdr, unsigned int max_hdr_size)
+ {
+ 
+@@ -708,7 +613,7 @@ static void * secbuf_peshdr_realloc(GstBrcmVidFilter *filter, uint32_t hdr_size)
+     return buf;
+ }
+ 
+-static uint32_t secbuf_export_atom(void *pDest, batom_t atom)
++uint32_t secbuf_export_atom(void *pDest, batom_t atom)
+ {
+     void *nexus_heap = NULL;
+     void *secbuf = NULL;
+@@ -748,7 +653,6 @@ static uint32_t secbuf_export_atom(void *pDest, batom_t atom)
+ #endif
+ #endif
+ 
+-#if (AV1_SUPPORTED)
+ /* AV1 Bitstream & Decoding Process Specification
+  * 4.10.5. leb128() */
+ static uint32_t
+@@ -771,21 +675,102 @@ b_media_read_leb128(batom_cursor *cursor, unsigned *bytes)
+     return value;
+ }
+ 
+-static bool gst_brcm_p_process_av1_payload(struct bmedia_frame_buf_allocator *allocator, batom_cursor *cursor, batom_accum_t src, unsigned payload_size, batom_accum_t dst, uint8_t *decryptedBuffer)
++batom_t gst_brcm_p_make_pes_packet(GstBrcmVidFilter *filter, batom_t atom, int64_t pts)
++{
++    batom_t pes_atom=NULL;
++
++    bmedia_pes_info pes_info;
++    BMEDIA_PES_INFO_INIT(&pes_info, REPACK_VIDEO_PES_ID);
++    BMEDIA_PES_SET_PTS(&pes_info, pts);
++
++    size_t hdr_len;
++    size_t payload_len = batom_len(atom);
++    if( payload_len > B_MEDIA_MAX_PES_SIZE) {
++        batom_accum_clear(filter->src);
++        batom_accum_add_atom(filter->src, atom);
++        batom_accum_clear(filter->dst);
++        pes_atom = bmedia_pes_subdivide_packet(filter->src, &pes_info, filter->dst, filter->pes_buf, sizeof(filter->pes_buf), B_MEDIA_MAX_PES_SIZE);
++    } else {
++        hdr_len = bmedia_pes_header_init(filter->pes_buf, payload_len, &pes_info);
++        pes_atom = batom_from_range_and_atom(filter->pes_buf, hdr_len, atom, NULL, NULL);
++    }
++    batom_release(atom);
++
++    return pes_atom;
++}
++
++batom_t gst_brcm_p_process_payload_vpx_bpp(GstBrcmVidFilter *filter, batom_t atom_pes)
++{
++    batom_t atom = NULL;
++    bmedia_bpp_pkt bpp;
++    void *bpp_buf = bmedia_frame_buf_alloc(&filter->frame_allocator, B_MPEG2PES_BPP_LENGTH);
++
++    if(bpp_buf) {
++        batom_accum_clear(filter->dst);
++        BKNI_Memset(&bpp, 0, sizeof(bpp));
++        bpp.data[0]=0x85; /* END OF CHUNK */
++        bmedia_make_bpp_pkt(0xe0, &bpp, bpp_buf, B_MPEG2PES_BPP_LENGTH);
++        batom_accum_add_atom(filter->dst, atom_pes);
++        batom_accum_add_range(filter->dst, bpp_buf, B_MPEG2PES_BPP_LENGTH);
++        atom = batom_from_accum(filter->dst, NULL, NULL);
++        batom_release(atom_pes);
++    } else {
++        atom = atom_pes;
++    }
++
++    return atom;
++}
++
++
++batom_t gst_brcm_p_process_payload_vpx(GstBrcmVidFilter *filter, batom_t atom_es)
++{
++    batom_t atom = NULL;
++    const size_t header_len = BMEDIA_FIELD_LEN("size", uint32_t) + BMEDIA_FIELD_LEN("type", uint16_t);
++    uint8_t *hdr = bmedia_frame_buf_alloc(&filter->frame_allocator, header_len);
++
++    if(!hdr) {
++        goto error;
++    }
++
++    size_t payload = batom_len(atom_es);
++    batom_accum_clear(filter->dst);
++
++    B_MEDIA_SAVE_UINT32_BE(hdr, payload+header_len+bmedia_frame_bcmv.len); /* size */
++    B_MEDIA_SAVE_UINT16_BE(hdr+BMEDIA_FIELD_LEN("size",uint32_t), 1); /* type */;
++    batom_accum_add_vec(filter->dst, &bmedia_frame_bcmv);
++    batom_accum_add_range(filter->dst, hdr, header_len);
++
++    batom_accum_add_atom(filter->dst,atom_es);
++    atom = batom_from_accum(filter->dst, NULL, NULL);
++
++error:
++    batom_release(atom_es);
++    return atom;
++}
++
++
++batom_t gst_brcm_p_process_payload_av1(GstBrcmVidFilter *filter, batom_t atom_es)
+ {
+     batom_cursor block;
+     const unsigned header_len = BMEDIA_FIELD_LEN("size", uint32_t) + BMEDIA_FIELD_LEN("type", uint16_t);
+-    uint8_t *hdr = bmedia_frame_buf_alloc(allocator, header_len);
++    uint8_t *hdr = bmedia_frame_buf_alloc(&filter->frame_allocator, header_len);
+     unsigned max_obu = 64;
+-    uint8_t *obu_frame = bmedia_frame_buf_alloc(allocator, header_len + 4 * max_obu);
++    uint8_t *obu_frame = bmedia_frame_buf_alloc(&filter->frame_allocator, header_len + 4 * max_obu);
+     unsigned parsed_payload = 0;
+     unsigned obu_count = 0;
++    batom_cursor cursor;
++    unsigned payload_size;
++    batom_t atom;
++
++    payload_size = batom_len(atom_es);
++    batom_cursor_from_atom(&cursor, atom_es);
++    batom_accum_clear(filter->dst);
+ 
+     if(!hdr || !obu_frame) {
+         goto err_no_mem;
+     }
+ 
+-    BATOM_CLONE(&block, cursor);
++    BATOM_CLONE(&block, &cursor);
+     for(;;)
+     {
+         /* AV1 Bitstream & Decoding Process Specification
+@@ -820,7 +805,7 @@ static bool gst_brcm_p_process_av1_payload(struct bmedia_frame_buf_allocator *al
+             obu_size = (payload_size - parsed_payload) - obu_header_size;
+         }
+         parsed_payload += obu_size + obu_header_size;
+-        GST_TRACE("obu:%#x(%u) type:%u obu_has_size_field:%u obu_size=%u(%u) payload:%u/%u/%u", (unsigned)obu_header, obu_count, obu_type, obu_has_size_field, obu_size, (obu_size+obu_header_size), parsed_payload, payload_size, (unsigned)(batom_cursor_pos(&block)-batom_cursor_pos(cursor)));
++        GST_TRACE("obu:%#x(%u) type:%u obu_has_size_field:%u obu_size=%u(%u) payload:%u/%u/%u", (unsigned)obu_header, obu_count, obu_type, obu_has_size_field, obu_size, (obu_size+obu_header_size), parsed_payload, payload_size, (unsigned)(batom_cursor_pos(&block)-batom_cursor_pos(&cursor)));
+         {
+             uint8_t *obu_hdr = obu_frame + header_len + 4*obu_count;
+             if(obu_count>=max_obu) {
+@@ -837,32 +822,44 @@ static bool gst_brcm_p_process_av1_payload(struct bmedia_frame_buf_allocator *al
+         }
+     }
+ err_bad_obu:
+-    BATOM_CLONE(&block, cursor);
++    BATOM_CLONE(&block, &cursor);
+     unsigned obu_payload = 4*obu_count;
++
+     B_MEDIA_SAVE_UINT32_BE(obu_frame, obu_payload+header_len+bmedia_frame_bcmv.len); /* size */
+     B_MEDIA_SAVE_UINT16_BE(obu_frame+BMEDIA_FIELD_LEN("size",uint32_t), 2); /* type */;
+-    batom_accum_add_vec(dst, &bmedia_frame_bcmv);
+-    batom_accum_add_range(dst, obu_frame, BMEDIA_FIELD_LEN("size",uint32_t)+BMEDIA_FIELD_LEN("type",uint16_t)+obu_payload);
++    batom_accum_add_vec(filter->dst, &bmedia_frame_bcmv);
++    batom_accum_add_range(filter->dst, obu_frame, BMEDIA_FIELD_LEN("size",uint32_t)+BMEDIA_FIELD_LEN("type",uint16_t)+obu_payload);
+ 
+-    if(batom_cursor_skip(cursor, payload_size) !=  payload_size) {
++    if(batom_cursor_skip(&cursor, payload_size) !=  payload_size) {
+         goto err_payload;
+     }
+ 
+     B_MEDIA_SAVE_UINT32_BE(hdr, payload_size+header_len+bmedia_frame_bcmv.len); /* size */
+     B_MEDIA_SAVE_UINT16_BE(hdr+BMEDIA_FIELD_LEN("size",uint32_t), 0); /* type */;
+-    batom_accum_add_vec(dst, &bmedia_frame_bcmv);
+-    batom_accum_add_range(dst, hdr, header_len);
++    batom_accum_add_vec(filter->dst, &bmedia_frame_bcmv);
++    batom_accum_add_range(filter->dst, hdr, header_len);
+ 
+-    if (decryptedBuffer) {
+-        batom_accum_add_range(dst, decryptedBuffer, payload_size);
+-    } else {
+-        batom_accum_append(dst, src, &block, cursor);
+-    }
++    batom_accum_add_atom(filter->dst,atom_es);
++    atom = batom_from_accum(filter->dst, NULL, NULL);
++
++    batom_release(atom_es);
+ 
+-    return true;
++    return atom;
+ 
+ err_no_mem:
+ err_payload:
+-    return false;
++    return NULL;
++}
++
++uint32_t gst_brcm_p_copy_atom(void *playpump_buffer, batom_t atom_pes)
++{
++    uint32_t data_size;
++    batom_cursor cursor;
++
++    data_size = batom_len(atom_pes);
++    batom_cursor_from_atom(&cursor, atom_pes);
++    batom_cursor_copy(&cursor,playpump_buffer,data_size);
++    batom_release(atom_pes);
++
++    return data_size;
+ }
+-#endif
+diff --git a/reference/vidfilter/src/gst_brcm_vid_filter.c b/reference/vidfilter/src/gst_brcm_vid_filter.c
+index 9796227..a048994 100755
+--- a/reference/vidfilter/src/gst_brcm_vid_filter.c
++++ b/reference/vidfilter/src/gst_brcm_vid_filter.c
+@@ -552,12 +552,10 @@ static NEXUS_Error nexus_alloc(GstBrcmVidFilter *filter)
+     NEXUS_PlaypumpOpenSettings playpumpOpenSettings;
+     NEXUS_PlaypumpSettings  settings;
+ 
+-#if (AV1_SUPPORTED)
+     bmedia_frame_buf_init(&filter->frame_allocator, filter->frame_buf, sizeof(filter->frame_buf));
+     filter->factory = batom_factory_create(bkni_alloc, 64);
+     filter->src = batom_accum_create(filter->factory);
+     filter->dst = batom_accum_create(filter->factory);
+-#endif
+ 
+     NEXUS_Playpump_GetDefaultOpenSettings(&playpumpOpenSettings);
+     playpumpOpenSettings.fifoSize = PLAYPUMP_VIDFILTER_FIFO_SIZE;
+@@ -1491,6 +1489,7 @@ static GstFlowReturn gst_brcm_vid_filter_chain (GstPad *pad, GstObject *parent,
+     int64_t pts=0;
+     uint32_t data_size;
+     GstFlowReturn flow;
++    batom_t atom = NULL;
+ 
+     void *  playpump_buffer;
+     size_t  playpump_buffer_size;
+@@ -1603,8 +1602,6 @@ static GstFlowReturn gst_brcm_vid_filter_chain (GstPad *pad, GstObject *parent,
+ 
+     while ( !filter->flush_started )
+     {
+-        uint8_t * secure_buffer = NULL;
+-
+         if (waitUs){
+             BRCM_G_MUTEX_LOCK(filter->flush_mutex);
+ #if (GLIB_MAJOR_VERSION > 2) || ((GLIB_MAJOR_VERSION == 2) && (GLIB_MINOR_VERSION > 31))
+@@ -1686,6 +1683,8 @@ static GstFlowReturn gst_brcm_vid_filter_chain (GstPad *pad, GstObject *parent,
+ #ifdef BGST_SVP_SUPPORT
+ #ifdef BGST_SVP_SECBUF
+         meta = gst_buffer_get_brcm_svp_meta(buf);
++        uint8_t * secure_buffer = NULL;
++
+         if (meta) {
+             brcm_svp_meta_data_t * meta_data;
+             int rc = -1;
+@@ -1738,13 +1737,15 @@ static GstFlowReturn gst_brcm_vid_filter_chain (GstPad *pad, GstObject *parent,
+             }
+         } else {
+             GST_LOG("no meta data");
+-            secure_buffer = NULL;
++            batom_accum_clear(filter->src);
++            batom_accum_add_range(filter->src, buf_ptr, buf_size);
++            atom = batom_from_accum(filter->src, NULL, NULL);
+         }
+ 
+ #else
+-        uint8_t *secure_buffer_free = NULL;
+ #ifdef BGST_SVP_META
+         GstBrcmSvpMeta* meta = NULL;
++
+         meta = gst_buffer_get_brcm_svp_meta(buf);
+ 
+         if (meta) {
+@@ -1755,16 +1756,16 @@ static GstFlowReturn gst_brcm_vid_filter_chain (GstPad *pad, GstObject *parent,
+                 uint8_t * decrypted_buf = (uint8_t *) meta_data->u.u3.secbuf_ptr;
+                 svp_chunk_info * chunk_info = (svp_chunk_info *)meta_data->u.u3.chunk_info;
+                 uint32_t  chunk_count =  meta_data->u.u3.chunks_cnt;
+-                
+-                secure_buffer_free = svp_util_get_whole_decrypted_buffer(buf_ptr, buf_size, decrypted_buf, (uint32_t*)chunk_info, chunk_count);
+-                secure_buffer = secure_buffer_free;                
++
++                atom = svp_util_decrypted_atom(filter->src, buf_ptr, buf_size, decrypted_buf, (uint32_t *)chunk_info, chunk_count);
+             } else {
+-                GST_TRACE("no meta data");
+-                secure_buffer = NULL;
++                GST_WARNING("metadata sub_type type x%x not supported", meta_data->sub_type);
+             }
+         } else {
+             GST_TRACE("no meta data");
+-            secure_buffer = NULL;
++            batom_accum_clear(filter->src);
++            batom_accum_add_range(filter->src, buf_ptr, buf_size);
++            atom = batom_from_accum(filter->src, NULL, NULL);
+         }
+ #else
+         GstSvpMeta* meta = NULL;
+@@ -1798,16 +1799,13 @@ static GstFlowReturn gst_brcm_vid_filter_chain (GstPad *pad, GstObject *parent,
+                         }
+                         if(has_clear)
+                         {
+-                            secure_buffer_free = svp_util_get_whole_decrypted_buffer(buf_ptr, buf_size, decrypted, (uint32_t*)map.data, subsamplescount);
+-                            secure_buffer = secure_buffer_free;
+-                            if (secure_buffer == NULL) {
+-                                GST_WARNING("get_whole_decrypted_buffer error");
+-                                filter->send_sps_pps = TRUE;
+-                            }
++                            atom = svp_util_decrypted_atom(filter->src, buf_ptr, buf_size, decrypted, (uint32_t*)map.data, subsamplescount);
+                         }
+                         else
+                         {
+-                            secure_buffer = decrypted;
++                            batom_accum_clear(filter->src);
++                            batom_accum_add_range(filter->src, decrypted, buf_size);
++                            atom = batom_from_accum(filter->src, NULL, NULL);
+                         }
+ 
+                         gst_buffer_unmap(subsamplesinfo, &map);
+@@ -1820,34 +1818,55 @@ static GstFlowReturn gst_brcm_vid_filter_chain (GstPad *pad, GstObject *parent,
+             } else {
+                 GST_WARNING("metadata does not have %s", GST_SVP_SYSTEM_ID_CAPS_FIELD);
+             }
++        }else {
++            batom_accum_clear(filter->src);
++            batom_accum_add_range(filter->src, buf_ptr, buf_size);
++            atom = batom_from_accum(filter->src, NULL, NULL);
+         }
+-#endif
+-#endif
+-#endif
+-        if (filter->video_codec == bvideo_codec_vp8) {
+-            data_size = gst_brcm_p_add_pes_bcmv_header_vpx(filter, playpump_buffer, buf_ptr, buf_size, pts, secure_buffer);
++#endif      // BGST_SVP_META
++#endif      // BGST_SVP_SECBUF
++#else
++        {   // NO SVP
++            batom_accum_clear(filter->src);
++            batom_accum_add_range(filter->src, buf_ptr, buf_size);
++            atom = batom_from_accum(filter->src, NULL, NULL);
+         }
++#endif      // BGST_SVP_SUPPORT
++        if (filter->video_codec == bvideo_codec_vp8
+ #if (VP9_SUPPORTED)
+-        else if (filter->video_codec == bvideo_codec_vp9) {
+-            data_size = gst_brcm_p_add_pes_bcmv_header_vpx(filter, playpump_buffer, buf_ptr, buf_size, pts, secure_buffer);
+-        }
++         || filter->video_codec == bvideo_codec_vp9
+ #endif
++        ) {
++            atom = gst_brcm_p_process_payload_vpx(filter, atom);
++            atom = gst_brcm_p_make_pes_packet(filter, atom, pts);
++            atom = gst_brcm_p_process_payload_vpx_bpp(filter, atom);    // end of chunk
++        }
+ #if (AV1_SUPPORTED)
+         else if (filter->video_codec == bvideo_codec_av1) {
+-            data_size = gst_brcm_p_add_pes_bcmv_header_av1(filter, playpump_buffer, buf_ptr, buf_size, pts, secure_buffer);
++            atom = gst_brcm_p_process_payload_av1(filter, atom);
++            atom = gst_brcm_p_make_pes_packet(filter, atom, pts);
+         }
+ #endif
+-        else
+-            data_size = gst_brcm_p_add_pes_header(filter, playpump_buffer, buf_ptr, buf_size, pts, secure_buffer);
++        else {
++            atom = gst_brcm_p_make_pes_packet(filter, atom, pts);
++        }
+ 
++#ifdef BGST_SVP_SUPPORT
++#ifdef BGST_SVP_SECBUF
++        data_size = secbuf_export_atom(playpump_buffer, atom);
++#else
++        data_size = svp_util_copy_atom(playpump_buffer, atom);
++#endif // BGST_SVP_SECBUF
++#else
++        // no svp
++        data_size = gst_brcm_p_copy_atom(playpump_buffer, atom);
++#endif
+         NEXUS_Playpump_WriteComplete(filter->playpump, 0, data_size);
+ 
++        bmedia_frame_buf_clear(&filter->frame_allocator);
++
+ #ifdef BGST_SVP_SUPPORT
+-#ifndef BGST_SVP_SECBUF
+-        if (secure_buffer_free) {
+-            svp_util_free_decrypted_buffer(secure_buffer_free);
+-        }
+-#else
++#ifdef BGST_SVP_SECBUF
+         if (secure_buffer) {
+             B_Secbuf_Free(secure_buffer);
+             secure_buffer = NULL;
+diff --git a/reference/vidfilter/src/gst_brcm_vid_filter.h b/reference/vidfilter/src/gst_brcm_vid_filter.h
+index e5cf3a1..8bdb529 100755
+--- a/reference/vidfilter/src/gst_brcm_vid_filter.h
++++ b/reference/vidfilter/src/gst_brcm_vid_filter.h
+@@ -46,6 +46,7 @@
+ #include "../../svpmeta/src/gst_brcm_svp_meta.h"
+ #endif
+ #ifdef BGST_SVP_SECBUF
++#include "../../svpmeta/src/gst_brcm_svp_meta.h"
+ #include "b_secbuf.h"
+ #endif
+ #endif
+@@ -128,12 +129,12 @@ struct _GstBrcmVidFilter
+     GstPad * downstream_peer_pad;
+     brcm_buflog_handle bufLog;
+ 
+-#if (AV1_SUPPORTED)
++    uint8_t pes_buf[1024];
++
+     struct bmedia_frame_buf_allocator frame_allocator;
+     uint8_t frame_buf[32768];
+     batom_accum_t src, dst;
+     batom_factory_t factory;
+-#endif
+ 
+ #if (HDR_STARTSETTINGS_SUPPORTED)
+     char colorimetry[COLORIMETRY_STR_MAX_LEN];
+@@ -148,11 +149,6 @@ struct _GstBrcmVidFilterClass
+ };
+ 
+ uint32_t gst_brcm_p_add_pes_header(GstBrcmVidFilter *filter, void *  playpump_buffer, uint8_t *buf_ptr, uint32_t buf_size, int64_t pts, uint8_t *decryptedBuffer);
+-uint32_t gst_brcm_p_add_pes_bcmv_header_vpx(GstBrcmVidFilter *filter, void *  playpump_buffer, uint8_t *buf_ptr, uint32_t buf_size, int64_t pts, uint8_t *decryptedBuffer);
+-#if (AV1_SUPPORTED)
+-uint32_t gst_brcm_p_add_pes_bcmv_header_av1(GstBrcmVidFilter *filter, void *  playpump_buffer, uint8_t *buf_ptr, uint32_t buf_size, int64_t pts, uint8_t *decryptedBuffer);
+-#endif
+-
+ uint32_t gst_brcm_p_h265_header(void * codec_data, char **hdr);
+ uint32_t gst_brcm_p_h264_sps_pps_header(void *  codec_data, void * header, unsigned int max_hdr_size);
+ uint32_t gst_brcm_p_h264_pes_sps_pps_header(GstBrcmVidFilter *filter, void *  playpump_buffer, uint8_t *sps_pps_header, uint32_t sps_pps_header_size, int64_t pts);
+@@ -161,6 +157,13 @@ void gst_brcm_p_h264_add_slice_start_code(guint8 *buffer, guint32 bufsz);
+ uint32_t gst_brcm_p_h264_eos_data(GstBrcmVidFilter *filter , uint8_t *playpump_buffer);
+ uint32_t gst_brcm_p_h265_eos_data(GstBrcmVidFilter *filter , uint8_t *playpump_buffer);
+ 
++batom_t gst_brcm_p_make_pes_packet(GstBrcmVidFilter *filter, batom_t atom, int64_t pts);
++batom_t gst_brcm_p_process_payload_vpx(GstBrcmVidFilter *filter, batom_t atom_es);
++batom_t gst_brcm_p_process_payload_vpx_bpp(GstBrcmVidFilter *filter, batom_t atom_pes);
++batom_t gst_brcm_p_process_payload_av1(GstBrcmVidFilter *filter, batom_t atom_es);
++uint32_t gst_brcm_p_copy_atom(void *playpump_buffer, batom_t atom_pes);
++uint32_t secbuf_export_atom(void *pDest, batom_t atom);
++
+ G_END_DECLS
+ 
+ #endif /* __GST_BRCM_VID_FILTER_H__ */
+-- 
+2.7.4
+
