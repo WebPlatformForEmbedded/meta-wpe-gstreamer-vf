@@ -1,0 +1,52 @@
+diff --git a/reference/videodecode/src/gst_brcm_video_decoder.c b/reference/videodecode/src/gst_brcm_video_decoder.c
+index 30ec8a9..d06d1f0 100644
+--- a/reference/videodecode/src/gst_brcm_video_decoder.c
++++ b/reference/videodecode/src/gst_brcm_video_decoder.c
+@@ -54,7 +54,7 @@ extern unsigned int gst_brcm_system_clock_get_stc_channel_info(NEXUS_SimpleStcCh
+ 
+ GST_DEBUG_CATEGORY_STATIC (brcmvideodecoder);
+ #define GST_CAT_DEFAULT brcmvideodecoder
+-
++#define ENABLE_HDR_PASSTHROUGH_FOR_NON_PLM_PLATFORMS 1
+ /* Filter signals and args */
+ enum
+ {
+@@ -2301,6 +2301,18 @@ static GstStateChangeReturn gst_brcm_video_decoder_change_state(GstElement *elem
+         decoder->decode_mode = NEXUS_VideoDecoderDecodeMode_eAll;
+         decoder->buffersToPush = 0;
+ 
++#if (ENABLE_HDR_PASSTHROUGH_FOR_NON_PLM_PLATFORMS)
++        /* non-PLM platform: set HDR to track input for passthrough operation */
++        {
++           NEXUS_Error rc;
++           NxClient_DisplaySettings displaySettings;
++           NxClient_GetDisplaySettings(&displaySettings);
++           displaySettings.hdmiPreferences.dynamicRangeMode = NEXUS_VideoDynamicRangeMode_eTrackInput;
++           rc = NxClient_SetDisplaySettings(&displaySettings);
++           if (rc) g_error("error setting HDR passthrough \n");
++        }
++#endif
++
+         GST_LOG("transition: NULL_TO_READY");
+         break;
+     }
+@@ -2492,6 +2504,19 @@ static GstStateChangeReturn gst_brcm_video_decoder_change_state(GstElement *elem
+ 
+         decoder->video_pid_channel = NULL;
+         decoder->stc_channel = NULL;
++
++#if (ENABLE_HDR_PASSTHROUGH_FOR_NON_PLM_PLATFORMS)
++        /* non-PLM platform: reset to SDR */
++        {
++           NEXUS_Error rc;
++           NxClient_DisplaySettings displaySettings;
++           NxClient_GetDisplaySettings(&displaySettings);
++           displaySettings.hdmiPreferences.dynamicRangeMode = NEXUS_VideoDynamicRangeMode_eSdr;
++           rc = NxClient_SetDisplaySettings(&displaySettings);
++           if (rc) g_error("error resetting SDR \n");
++        }
++#endif
++
+         GST_LOG("transition: READY_TO_NULL");
+         break;
+     }
